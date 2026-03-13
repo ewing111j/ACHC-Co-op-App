@@ -400,6 +400,8 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
             childAspectRatio: 0.88,
+            // Extra padding so badge dots aren't clipped at the grid edge
+            padding: const EdgeInsets.only(top: 8, right: 8),
             children: features.map((f) => _FeatureTile(
               item: f,
               badgeEnabled: _notifPrefs[f.notifKey] ?? false,
@@ -425,13 +427,13 @@ class _HomeScreenState extends State<HomeScreen> {
         Navigator.push(context, MaterialPageRoute(builder: (_) => f.screen));
       },
       onLongPress: () => _showClearBadgeMenu(context, f.label, f.seenKey),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        decoration: AppTheme.featureTileDecoration(f.color),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
+      child: Stack(
+        children: [
+          // Tile
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: AppTheme.featureTileDecoration(f.color),
+            child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
@@ -458,22 +460,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            // Badge overlaid at top-right corner
-            if (_notifPrefs[f.notifKey] ?? false)
-              Positioned(
-                top: -6,
-                right: -6,
-                child: _BadgeCounter(
-                  notifKey: f.notifKey ?? '',
-                  badgeQuery: f.badgeQuery,
-                  db: _db,
-                  userUid: user.uid,
-                  tileColor: f.color,
-                  lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
-                ),
+          ),
+          // Badge sits inside the tile at the top-right corner
+          if (_notifPrefs[f.notifKey] ?? false)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: _BadgeCounter(
+                notifKey: f.notifKey ?? '',
+                badgeQuery: f.badgeQuery,
+                db: _db,
+                userUid: user.uid,
+                tileColor: f.color,
+                lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -722,9 +724,8 @@ class _FeatureTile extends StatelessWidget {
         );
       },
       child: Stack(
-        clipBehavior: Clip.none,
         children: [
-          // Tile body — same original style
+          // Tile body — fills the grid cell given by GridView
           Container(
             decoration: AppTheme.featureTileDecoration(item.color),
             child: Column(
@@ -749,11 +750,11 @@ class _FeatureTile extends StatelessWidget {
               ],
             ),
           ),
-          // Badge overlaid at the top-right corner, partially outside tile
+          // Badge sits inside the tile at the top-right corner
           if (badgeEnabled && item.notifKey != null)
             Positioned(
-              top: -6,
-              right: -6,
+              top: 6,
+              right: 6,
               child: _BadgeCounter(
                 notifKey: item.notifKey!,
                 badgeQuery: item.badgeQuery,
