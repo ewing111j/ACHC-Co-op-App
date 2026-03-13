@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'providers/auth_provider.dart';
+import 'providers/assignments_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'utils/app_theme.dart';
@@ -17,6 +19,9 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
+  // Initialize Hive for offline caching
+  await Hive.initFlutter();
 
   // Initialize Firebase
   await Firebase.initializeApp(
@@ -41,6 +46,7 @@ class AchcHubApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => AssignmentsProvider()),
       ],
       child: MaterialApp(
         title: 'ACHC Hub',

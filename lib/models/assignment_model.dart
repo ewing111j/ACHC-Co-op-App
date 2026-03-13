@@ -18,6 +18,8 @@ class AssignmentModel {
   final String? assignedTo; // uid or 'all'
   final String familyId;
   final DateTime createdAt;
+  /// Non-null for repeating series; all instances share the same seriesId.
+  final String? seriesId;
 
   const AssignmentModel({
     required this.id,
@@ -35,10 +37,16 @@ class AssignmentModel {
     this.assignedTo,
     required this.familyId,
     required this.createdAt,
+    this.seriesId,
   });
 
   bool get isOverdue =>
       dueDate.isBefore(DateTime.now()) && status == AssignmentStatus.pending;
+
+  bool get isDone =>
+      status == AssignmentStatus.submitted || status == AssignmentStatus.graded;
+
+  bool get isPartOfSeries => seriesId != null && seriesId!.isNotEmpty;
 
   factory AssignmentModel.fromMoodle(Map<String, dynamic> map) {
     final dueDate = map['duedate'] != null && map['duedate'] != 0
@@ -84,6 +92,7 @@ class AssignmentModel {
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['createdAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
+      seriesId: map['seriesId'] as String?,
     );
   }
 
@@ -103,6 +112,29 @@ class AssignmentModel {
       'assignedTo': assignedTo,
       'familyId': familyId,
       'createdAt': createdAt,
+      if (seriesId != null) 'seriesId': seriesId,
+    };
+  }
+
+  /// JSON-safe map for local Hive caching (no Firestore Timestamp / DateTime).
+  Map<String, dynamic> toCacheMap() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'courseName': courseName,
+      'courseId': courseId,
+      'dueDate': {'millisecondsSinceEpoch': dueDate.millisecondsSinceEpoch},
+      'status': status.name,
+      'grade': grade,
+      'maxGrade': maxGrade,
+      'submissionUrl': submissionUrl,
+      'fromMoodle': fromMoodle,
+      'isOptional': isOptional,
+      'assignedTo': assignedTo,
+      'familyId': familyId,
+      'createdAt': {'millisecondsSinceEpoch': createdAt.millisecondsSinceEpoch},
+      if (seriesId != null) 'seriesId': seriesId,
     };
   }
 
