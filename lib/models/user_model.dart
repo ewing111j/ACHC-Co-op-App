@@ -1,15 +1,15 @@
 // lib/models/user_model.dart
 
-enum UserRole { parent, kid, admin }
+enum UserRole { parent, student, admin }
 
 class UserModel {
   final String uid;
   final String email;
   final String displayName;
   final UserRole role;
-  final String? parentUid; // For kid accounts
+  final String? parentUid; // For student accounts
   final String? familyId;
-  final List<String> kidUids; // For parent accounts
+  final List<String> kidUids; // Student UIDs for parent accounts
   final String? avatarUrl;
   final String? moodleToken;
   final String? moodleUrl;
@@ -34,7 +34,9 @@ class UserModel {
   });
 
   bool get isParent => role == UserRole.parent;
-  bool get isKid => role == UserRole.kid;
+  bool get isStudent => role == UserRole.student;
+  // Legacy alias for backward compat
+  bool get isKid => role == UserRole.student;
   bool get isAdmin => role == UserRole.admin;
 
   factory UserModel.fromMap(Map<String, dynamic> map, String uid) {
@@ -62,7 +64,7 @@ class UserModel {
     return {
       'email': email,
       'displayName': displayName,
-      'role': role.name,
+      'role': role == UserRole.student ? 'student' : role.name,
       'parentUid': parentUid,
       'familyId': familyId,
       'kidUids': kidUids,
@@ -103,7 +105,8 @@ class UserModel {
   static UserRole _roleFromString(String role) {
     switch (role) {
       case 'kid':
-        return UserRole.kid;
+      case 'student':
+        return UserRole.student;
       case 'admin':
         return UserRole.admin;
       default:

@@ -30,7 +30,7 @@ class AuthService {
     }
   }
 
-  // Kid login: parent email + kid name + kid password
+  // Student login: parent email + student name + student password
   Future<UserModel?> signInAsKid(
       String parentEmail, String kidName, String kidPassword) async {
     try {
@@ -49,14 +49,14 @@ class AuthService {
       final parentData = parentDoc.data();
       final kidUids = List<String>.from(parentData['kidUids'] as List? ?? []);
 
-      // Find kid by name within this family
+      // Find student by name within this family
       for (final kidUid in kidUids) {
         final kidDoc = await _db.collection('users').doc(kidUid).get();
         if (kidDoc.exists) {
           final kidData = kidDoc.data()!;
           final storedName = (kidData['displayName'] as String? ?? '').toLowerCase();
           if (storedName == kidName.toLowerCase().trim()) {
-            // Sign in kid with their email (parentEmail_kidName@achc.app)
+            // Sign in student with their email
             final kidEmail = _buildKidEmail(parentEmail, kidName);
             try {
               final cred = await _auth.signInWithEmailAndPassword(
@@ -70,7 +70,7 @@ class AuthService {
           }
         }
       }
-      throw Exception('Kid "$kidName" not found under this parent account');
+      throw Exception('Student "$kidName" not found under this parent account');
     } catch (e) {
       rethrow;
     }
@@ -121,7 +121,7 @@ class AuthService {
     }
   }
 
-  // Add kid to family (called by parent) — uses secondary FirebaseApp to
+  // Add student to family (called by parent) — uses secondary FirebaseApp to
   // avoid signing out the currently-logged-in parent.
   Future<UserModel?> addKidToFamily({
     required UserModel parent,
@@ -129,14 +129,14 @@ class AuthService {
     required String kidPassword,
   }) async {
     if (kidName.trim().isEmpty) {
-      throw Exception('Kid name cannot be empty');
+      throw Exception('Student name cannot be empty');
     }
     // Password is optional — generate one if blank
     final finalPassword = kidPassword.trim().isEmpty
         ? 'ACHC${kidName.trim().replaceAll(' ', '')}2024!'
         : kidPassword.trim();
     if (finalPassword.length < 6) {
-      throw Exception('Kid password must be at least 6 characters');
+      throw Exception('Student password must be at least 6 characters');
     }
 
     final kidEmail = _buildKidEmail(parent.email, kidName.trim());
@@ -156,7 +156,7 @@ class AuthService {
       final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
       final cred = await secondaryAuth.createUserWithEmailAndPassword(
           email: kidEmail, password: finalPassword);
-      if (cred.user == null) throw Exception('Failed to create kid account');
+      if (cred.user == null) throw Exception('Failed to create student account');
 
       await cred.user!.updateDisplayName(kidName.trim());
       // Sign out of secondary app immediately (parent still logged in on primary)
@@ -166,7 +166,7 @@ class AuthService {
         uid: cred.user!.uid,
         email: kidEmail,
         displayName: kidName.trim(),
-        role: UserRole.kid,
+        role: UserRole.student,
         parentUid: parent.uid,
         familyId: parent.familyId,
         kidUids: [],
@@ -211,7 +211,7 @@ class AuthService {
     }
   }
 
-  // Get kids for a parent
+  // Get students for a parent
   Future<List<UserModel>> getKidsForParent(String parentUid) async {
     try {
       final snap = await _db
@@ -246,10 +246,10 @@ class AuthService {
   }
 
   String _buildKidEmail(String parentEmail, String kidName) {
-    final sanitizedKidName =
+    final sanitizedName =
         kidName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
     final parentUser = parentEmail.split('@').first;
-    return '${parentUser}_$sanitizedKidName@achc-kid.app';
+    return '${parentUser}_$sanitizedName@achc-student.app';
   }
 
   String _handleAuthError(FirebaseAuthException e) {

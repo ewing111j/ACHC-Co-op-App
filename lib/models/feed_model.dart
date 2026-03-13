@@ -15,6 +15,8 @@ class FeedModel {
   final Map<String, dynamic> pollVotes;
   final bool inKidFeed;
   final DateTime createdAt;
+  final String? attachmentUrl;
+  final String? attachmentName;
 
   const FeedModel({
     required this.id,
@@ -29,6 +31,8 @@ class FeedModel {
     required this.pollVotes,
     required this.inKidFeed,
     required this.createdAt,
+    this.attachmentUrl,
+    this.attachmentName,
   });
 
   factory FeedModel.fromMap(Map<String, dynamic> map, String id) {
@@ -55,11 +59,13 @@ class FeedModel {
       commentCount: map['commentCount'] as int? ?? 0,
       pollOptions: List<String>.from(map['pollOptions'] as List? ?? []),
       pollVotes: Map<String, dynamic>.from(map['pollVotes'] as Map? ?? {}),
-      inKidFeed: map['inKidFeed'] as bool? ?? false,
+      inKidFeed: map['inKidFeed'] as bool? ?? map['inStudentFeed'] as bool? ?? false,
       createdAt: map['createdAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['createdAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
+      attachmentUrl: map['attachmentUrl'] as String?,
+      attachmentName: map['attachmentName'] as String?,
     );
   }
 

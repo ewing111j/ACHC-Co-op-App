@@ -37,8 +37,8 @@ class HomeScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!user.isKid) _buildWelcomeBanner(user),
-                      if (!user.isKid) const SizedBox(height: 20),
+                      if (!user.isStudent) _buildWelcomeBanner(user),
+                      if (!user.isStudent) const SizedBox(height: 20),
                       _buildFeatureGrid(context, user),
                       if (user.isAdmin) ...[
                         const SizedBox(height: 24),
@@ -209,7 +209,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildRolePill(UserModel user) {
-    final label = user.isAdmin ? 'ADMIN' : user.isKid ? 'STUDENT' : 'PARENT';
+    final label = user.isAdmin ? 'ADMIN' : user.isStudent ? 'STUDENT' : 'PARENT';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -283,12 +283,12 @@ class HomeScreen extends StatelessWidget {
       children: [
         AppTheme.sectionHeader('Quick Access'),
         GridView.count(
-          crossAxisCount: user.isKid ? 1 : 3,
+          crossAxisCount: user.isStudent ? 1 : 3,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          childAspectRatio: user.isKid ? 3.5 : 0.88,
+          childAspectRatio: user.isStudent ? 3.5 : 0.88,
           children: features.map((f) => _FeatureTile(item: f)).toList(),
         ),
       ],
@@ -296,7 +296,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   List<_FeatureItem> _features(UserModel user) {
-    if (user.isKid) {
+    if (user.isStudent) {
       return [
         _FeatureItem('Assignments', Icons.assignment_outlined,
           AppTheme.assignmentsColor, const AssignmentsScreen()),

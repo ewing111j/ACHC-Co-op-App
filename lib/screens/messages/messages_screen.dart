@@ -62,7 +62,7 @@ class _MessagesScreenState extends State<MessagesScreen>
               onPressed: () => _showCreateGroupSheet(context, user, isCommittee: true),
             ),
           // Everyone (non-kid): create personal chats in tab 1
-          if (_tabController.index == 1 && !user.isKid)
+          if (_tabController.index == 1 && !user.isStudent)
             IconButton(
               icon: const Icon(Icons.add),
               tooltip: 'New Chat',
@@ -256,7 +256,7 @@ class _PersonalTab extends StatelessWidget {
                 const Text('No personal messages yet',
                     style: TextStyle(fontSize: 15, color: AppTheme.textSecondary)),
                 const SizedBox(height: 8),
-                if (!user.isKid)
+                if (!user.isStudent)
                   const Text('Tap + to start a direct message or group chat',
                       style: TextStyle(color: AppTheme.textHint, fontSize: 13)),
               ],
@@ -962,7 +962,7 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  bool get _canSend => !widget.user.isKid;
+  bool get _canSend => !widget.user.isStudent;
 
   @override
   Widget build(BuildContext context) {

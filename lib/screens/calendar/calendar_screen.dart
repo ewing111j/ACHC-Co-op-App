@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/event_model.dart';
 import '../../utils/app_theme.dart';
@@ -183,46 +184,176 @@ class _EventCard extends StatelessWidget {
           bottom: BorderSide(color: AppTheme.cardBorder),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        title: Text(event.title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (event.description.isNotEmpty)
-              Text(event.description,
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                  maxLines: 2),
-            const SizedBox(height: 4),
-            Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            title: Text(event.title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700, fontSize: 14)),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.access_time, size: 12, color: AppTheme.textHint),
-                const SizedBox(width: 4),
-                Text(
-                  DateFormat('h:mm a').format(event.startDate),
-                  style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
+                if (event.description.isNotEmpty)
+                  Text(event.description,
+                      style: const TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
+                      maxLines: 2),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time,
+                        size: 12, color: AppTheme.textHint),
+                    const SizedBox(width: 4),
+                    Text(
+                      DateFormat('h:mm a').format(event.startDate),
+                      style: const TextStyle(
+                          fontSize: 11, color: AppTheme.textHint),
+                    ),
+                    if (event.location != null &&
+                        event.location!.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      const Icon(Icons.place_outlined,
+                          size: 12, color: AppTheme.textHint),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(event.location!,
+                            style: const TextStyle(
+                                fontSize: 11, color: AppTheme.textHint),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ],
                 ),
-                if (event.location != null && event.location!.isNotEmpty) ...[
-                  const SizedBox(width: 12),
-                  const Icon(Icons.place_outlined, size: 12, color: AppTheme.textHint),
-                  const SizedBox(width: 4),
-                  Text(event.location!,
-                      style: const TextStyle(fontSize: 11, color: AppTheme.textHint)),
-                ],
               ],
             ),
-          ],
-        ),
-        trailing: (user?.isAdmin == true || user?.uid == event.createdBy)
-            ? IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    size: 18, color: AppTheme.textHint),
-                onPressed: () => db.collection('events').doc(event.id).delete(),
-              )
-            : null,
+            trailing: (user?.isAdmin == true || user?.uid == event.createdBy)
+                ? IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        size: 18, color: AppTheme.textHint),
+                    onPressed: () =>
+                        db.collection('events').doc(event.id).delete(),
+                  )
+                : null,
+          ),
+          // Add to calendar row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _addToGoogleCalendar(context),
+                  icon: const Icon(Icons.calendar_today, size: 14),
+                  label: const Text('Google Cal',
+                      style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.calendarColor,
+                    side: BorderSide(
+                        color: AppTheme.calendarColor.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _addToIcal(context),
+                  icon: const Icon(Icons.download_outlined, size: 14),
+                  label: const Text('iCal / Apple',
+                      style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.navy,
+                    side: BorderSide(
+                        color: AppTheme.navy.withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  /// Opens Google Calendar "add event" URL in the browser
+  Future<void> _addToGoogleCalendar(BuildContext context) async {
+    final fmt = DateFormat("yyyyMMdd'T'HHmmss");
+    final start = fmt.format(event.startDate.toUtc());
+    final end = fmt.format(event.startDate
+        .add(const Duration(hours: 1))
+        .toUtc());
+    final title = Uri.encodeComponent(event.title);
+    final details = Uri.encodeComponent(event.description);
+    final location = Uri.encodeComponent(event.location ?? '');
+
+    final url = Uri.parse(
+        'https://www.google.com/calendar/render'
+        '?action=TEMPLATE'
+        '&text=$title'
+        '&dates=$start/$end'
+        '&details=$details'
+        '&location=$location');
+
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open Google Calendar')),
+      );
+    }
+  }
+
+  /// Opens iCal deep-link (works on iOS/macOS; on web prompts .ics download)
+  Future<void> _addToIcal(BuildContext context) async {
+    final fmt = DateFormat("yyyyMMdd'T'HHmmss'Z'");
+    final start = fmt.format(event.startDate.toUtc());
+    final end = fmt.format(
+        event.startDate.add(const Duration(hours: 1)).toUtc());
+    final uid =
+        '${event.id}@achc-hub.app';
+    final title = event.title.replaceAll(',', '\\,');
+    final desc = event.description.replaceAll(',', '\\,');
+    final loc = (event.location ?? '').replaceAll(',', '\\,');
+
+    final ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//ACHC Hub//EN',
+      'BEGIN:VEVENT',
+      'UID:$uid',
+      'DTSTART:$start',
+      'DTEND:$end',
+      'SUMMARY:$title',
+      'DESCRIPTION:$desc',
+      'LOCATION:$loc',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    // Encode as data URI
+    final encoded = Uri.encodeComponent(ics);
+    final url = Uri.parse('data:text/calendar;charset=utf8,$encoded');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url);
+    } else {
+      // Fallback: open Apple Calendar web
+      final apple = Uri.parse('webcal://p${event.startDate.year}-'
+          'calendarws.icloud.com/ca');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'iCal: Copy this event on ${DateFormat('MMM d').format(event.startDate)}')),
+        );
+      }
+    }
   }
 }
 

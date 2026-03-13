@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/feed_model.dart';
 import '../../models/user_model.dart';
@@ -91,7 +94,7 @@ class _FeedsScreenState extends State<FeedsScreen>
   }
 
   bool _canPost(UserModel user, FeedType type) {
-    if (user.isKid) return false;
+    if (user.isStudent) return false;
     if (type == FeedType.announcement) return user.isAdmin;
     return true;
   }
@@ -182,6 +185,7 @@ class _PostCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLiked = post.likedBy.contains(user.uid);
     final typeColor = _typeColor(post.type);
+    final inStudentFeed = post.inKidFeed;  // inKidFeed field stores inStudentFeed
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -192,7 +196,28 @@ class _PostCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        children:
+        [
+          // Student feed indicator
+          if (inStudentFeed)
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.gold.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppTheme.gold.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.star, size: 12, color: AppTheme.gold),
+                  SizedBox(width: 5),
+                  Text('Also in Student Feed',
+                      style: TextStyle(fontSize: 11, color: AppTheme.gold, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -238,7 +263,7 @@ class _PostCard extends StatelessWidget {
                         letterSpacing: 0.5),
                   ),
                 ),
-                if ((user.isAdmin || user.uid == post.authorId) && !user.isKid)
+                if ((user.isAdmin || user.uid == post.authorId) && !user.isStudent)
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert, size: 18, color: AppTheme.textHint),
                     onSelected: (v) {
@@ -275,6 +300,47 @@ class _PostCard extends StatelessWidget {
             ),
           ),
 
+          // Attachment
+          if (post.attachmentUrl != null && post.attachmentUrl!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: InkWell(
+                onTap: () async {
+                  // URL launcher is already imported
+                  final url = Uri.parse(post.attachmentUrl!);
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.navy.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.navy.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.attach_file,
+                          size: 16, color: AppTheme.navy),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          post.attachmentName ?? 'Attachment',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.navy,
+                              decoration: TextDecoration.underline),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(Icons.open_in_new,
+                          size: 14, color: AppTheme.textHint),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           // Poll
           if (post.pollOptions.isNotEmpty)
             _PollWidget(post: post, user: user, db: db),
@@ -576,8 +642,25 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                 },
               ),
             ),
-            if (!widget.user.isKid) ...[
+            if (!widget.user.isStudent) ...[
               const Divider(height: 1),
+              if (widget.post.inKidFeed)
+                Container(
+                  color: AppTheme.gold.withValues(alpha: 0.08),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.star, size: 13, color: AppTheme.gold),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'These comments appear in students\' feeds',
+                          style: TextStyle(fontSize: 11, color: AppTheme.gold, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Padding(
                 padding: EdgeInsets.only(
                   left: 16, right: 16, top: 10,
@@ -656,12 +739,15 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
   final _titleCtrl = TextEditingController();
   final _contentCtrl = TextEditingController();
   bool _isPoll = false;
-  bool _inKidFeed = false;
+  bool _inStudentFeed = false;
   final List<TextEditingController> _pollOptions = [
     TextEditingController(),
     TextEditingController(),
   ];
   bool _saving = false;
+  String? _attachmentUrl;
+  String? _attachmentName;
+  bool _uploadingFile = false;
 
   @override
   void dispose() {
@@ -669,6 +755,36 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
     _contentCtrl.dispose();
     for (final c in _pollOptions) c.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAttachment() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+    setState(() => _uploadingFile = true);
+    try {
+      final ext = file.extension ?? 'bin';
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final ref = FirebaseStorage.instance.ref().child('attachments/$fileName');
+      final task = await ref.putData(bytes);
+      final url = await task.ref.getDownloadURL();
+      setState(() {
+        _attachmentUrl = url;
+        _attachmentName = file.name ?? fileName;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: AppTheme.error));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingFile = false);
+    }
   }
 
   @override
@@ -719,6 +835,35 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
                 minLines: 3,
               ),
               const SizedBox(height: 12),
+              // File attachment
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _uploadingFile ? null : _pickAttachment,
+                    icon: _uploadingFile
+                        ? const SizedBox(
+                            width: 14, height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.attach_file, size: 16),
+                    label: Text(_attachmentName != null
+                        ? _attachmentName!
+                        : 'Attach File'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.navy,
+                      side: BorderSide(color: AppTheme.navy.withValues(alpha: 0.4)),
+                    ),
+                  ),
+                  if (_attachmentUrl != null)
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 16, color: AppTheme.error),
+                      onPressed: () => setState(() {
+                        _attachmentUrl = null;
+                        _attachmentName = null;
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Add Poll'),
@@ -744,13 +889,22 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
                   label: const Text('Add Option'),
                 ),
               ],
+              if (widget.type == FeedType.announcement || widget.type == FeedType.social)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Also post to Student Feed'),
+                  subtitle: const Text('Default: OFF', style: TextStyle(fontSize: 11, color: AppTheme.textHint)),
+                  value: _inStudentFeed,
+                  activeThumbColor: AppTheme.navy,
+                  onChanged: (v) => setState(() => _inStudentFeed = v),
+                ),
               if (widget.type == FeedType.prayer)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Show in Kids\' Feed'),
-                  value: _inKidFeed,
+                  title: const Text('Show in Students\' Feed'),
+                  value: _inStudentFeed,
                   activeThumbColor: AppTheme.navy,
-                  onChanged: (v) => setState(() => _inKidFeed = v),
+                  onChanged: (v) => setState(() => _inStudentFeed = v),
                 ),
               const SizedBox(height: 16),
               SizedBox(
@@ -793,7 +947,10 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
         'commentCount': 0,
         'pollOptions': pollOptions,
         'pollVotes': {},
-        'inKidFeed': _inKidFeed,
+        'inKidFeed': _inStudentFeed,
+        'inStudentFeed': _inStudentFeed,
+        'attachmentUrl': _attachmentUrl,
+        'attachmentName': _attachmentName,
         'createdAt': FieldValue.serverTimestamp(),
       });
       if (mounted) Navigator.pop(context);

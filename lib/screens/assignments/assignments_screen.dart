@@ -1,10 +1,13 @@
 // lib/screens/assignments/assignments_screen.dart
-// Enhanced: kid selector, weekly summary per class, color-coded, checkboxes,
+// Enhanced: student selector, weekly summary per class, color-coded, checkboxes,
 // printable PDFs, parent deadline notifications, full sync Firebase/Moodle
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import '../../providers/auth_provider.dart';
 import '../../models/assignment_model.dart';
 import '../../models/user_model.dart';
@@ -12,7 +15,6 @@ import '../../services/firestore_service.dart';
 import '../../services/moodle_service.dart';
 import '../../utils/app_theme.dart';
 import '../moodle/moodle_setup_screen.dart';
-
 class AssignmentsScreen extends StatefulWidget {
   const AssignmentsScreen({super.key});
 
@@ -28,8 +30,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
   late TabController _tabController;
   bool _isSyncing = false;
   String? _selectedKidUid; // parent selects which kid to view
-  UserModel? _selectedKid;
-  List<UserModel> _kids = [];
+  UserModel? _selectedStudent;
+  List<UserModel> _students = [];
   bool _weeklyView = false;
 
   @override
@@ -48,11 +50,11 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
       _moodleService.configure(user.moodleUrl!, user.moodleToken!);
     }
     if (user.isParent || user.isAdmin) {
-      await _loadKids(user);
+      await _loadStudents(user);
     }
   }
 
-  Future<void> _loadKids(UserModel user) async {
+  Future<void> _loadStudents(UserModel user) async {
     if (user.kidUids.isEmpty) return;
     final futures = user.kidUids.map((uid) => _db.collection('users').doc(uid).get());
     final docs = await Future.wait(futures);
@@ -60,7 +62,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
         .where((d) => d.exists)
         .map((d) => UserModel.fromMap(d.data()!, d.id))
         .toList();
-    if (mounted) setState(() => _kids = kids);
+    if (mounted) setState(() => _students = kids);
   }
 
   @override
@@ -122,14 +124,126 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     ));
   }
 
-  @override
+  Future<void> _printAssignments(BuildContext context, UserModel user) async {
+    // Get current student name
+    final studentName = _selectedStudent?.displayName ?? user.displayName;
+    final familyId = user.familyId ?? '';
+    final viewUid = user.isStudent ? user.uid : (_selectedKidUid ?? user.uid);
+
+    // Fetch assignments
+    List<AssignmentModel> assignments = [];
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('assignments')
+          .where('familyId', isEqualTo: familyId)
+          .get();
+      assignments = snap.docs
+          .map((d) => AssignmentModel.fromMap(d.data(), d.id))
+          .where((a) => a.assignedTo == viewUid || a.assignedTo == null || a.assignedTo!.isEmpty || a.assignedTo == 'all')
+          .toList();
+      assignments.sort((a, b) => a.dueDate != null && b.dueDate != null
+          ? a.dueDate!.compareTo(b.dueDate!)
+          : 0);
+    } catch (e) {
+      _showSnack('Could not load assignments for print', isError: true);
+      return;
+    }
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.letter,
+        build: (pw.Context ctx) {
+          return [
+            pw.Header(
+              level: 0,
+              child: pw.Text(
+                'Assignments – $studentName',
+                style: pw.TextStyle(
+                    fontSize: 18, fontWeight: pw.FontWeight.bold),
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Printed: ${DateFormat('MMMM d, y').format(DateTime.now())}',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 16),
+            if (assignments.isEmpty)
+              pw.Text('No assignments found.',
+                  style: const pw.TextStyle(fontSize: 12))
+            else
+              ...assignments.map((a) {
+                final status = a.status.name;
+                final done = a.status == AssignmentStatus.submitted ||
+                    a.status == AssignmentStatus.graded;
+                return pw.Container(
+                  margin: const pw.EdgeInsets.only(bottom: 8),
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey300),
+                    borderRadius: pw.BorderRadius.circular(4),
+                  ),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        done ? '[✓]' : '[ ]',
+                        style: pw.TextStyle(
+                            fontSize: 13,
+                            fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.SizedBox(width: 8),
+                      pw.Expanded(
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(a.title,
+                                style: pw.TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: pw.FontWeight.bold)),
+                            if (a.courseName.isNotEmpty)
+                              pw.Text(a.courseName,
+                                  style: const pw.TextStyle(
+                                      fontSize: 11,
+                                      color: PdfColors.grey600)),
+                            if (a.description.isNotEmpty)
+                              pw.Text(a.description,
+                                  style: const pw.TextStyle(
+                                      fontSize: 11)),
+                            if (a.dueDate != null)
+                              pw.Text(
+                                'Due: ${DateFormat('MMM d, y').format(a.dueDate!)}',
+                                style: pw.TextStyle(
+                                    fontSize: 11,
+                                    color: done
+                                        ? PdfColors.green700
+                                        : PdfColors.red700),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ];
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) async => doc.save(),
+      name: 'Assignments_$studentName.pdf',
+    );
+  }
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.currentUser!;
     final familyId = user.familyId ?? '';
 
     // Determine whose assignments to show
-    final viewUid = user.isKid
+    final viewUid = user.isStudent
         ? user.uid
         : (_selectedKidUid ?? user.uid);
 
@@ -142,12 +256,17 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          if (!user.isKid)
+          if (!user.isStudent)
             IconButton(
               icon: Icon(_weeklyView ? Icons.view_list : Icons.calendar_view_week),
               tooltip: _weeklyView ? 'List View' : 'Weekly View',
               onPressed: () => setState(() => _weeklyView = !_weeklyView),
             ),
+          IconButton(
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Print Assignments',
+            onPressed: () => _printAssignments(context, user),
+          ),
           if (user.isParent || user.isAdmin)
             IconButton(
               icon: _isSyncing
@@ -170,8 +289,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
       ),
       body: Column(
         children: [
-          // Kid Selector (parents only)
-          if ((user.isParent || user.isAdmin) && _kids.isNotEmpty)
+          // Student Selector (parents only)
+          if ((user.isParent || user.isAdmin) && _students.isNotEmpty)
             _buildKidSelector(),
           // Assignments List
           Expanded(
@@ -231,15 +350,15 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
               isSelected: _selectedKidUid == null,
               onTap: () => setState(() {
                 _selectedKidUid = null;
-                _selectedKid = null;
+                _selectedStudent = null;
               }),
             ),
-            ..._kids.map((kid) => _KidChip(
-              label: kid.displayName,  // Full name
-              isSelected: _selectedKidUid == kid.uid,
+            ..._students.map((student) => _KidChip(
+              label: student.displayName,  // Full name
+              isSelected: _selectedKidUid == student.uid,
               onTap: () => setState(() {
-                _selectedKidUid = kid.uid;
-                _selectedKid = kid;
+                _selectedKidUid = student.uid;
+                _selectedStudent = student;
               }),
             )),
           ],
@@ -250,7 +369,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
 
   Map<String, String> _buildKidNames() {
     final map = <String, String>{};
-    for (final k in _kids) { map[k.uid] = k.displayName; }
+    for (final k in _students) { map[k.uid] = k.displayName; }
     return map;
   }
 
@@ -265,7 +384,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
             const SizedBox(height: 16),
             Text(emptyMsg,
                 style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
-            if (!_moodleService.isConfigured && !user.isKid) ...[
+            if (!_moodleService.isConfigured && !user.isStudent) ...[
               const SizedBox(height: 12),
               ElevatedButton.icon(
                 onPressed: _showMoodleSetup,
@@ -281,7 +400,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
 
     final kidNames = _buildKidNames();
 
-    if (_weeklyView && !user.isKid) {
+    if (_weeklyView && !user.isStudent) {
       return _WeeklyView(assignments: assignments, user: user, db: _db, kidNames: kidNames);
     }
 
@@ -292,14 +411,14 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
         assignment: assignments[i],
         user: user,
         db: _db,
-        isKidView: user.isKid,
+        isStudentView: user.isStudent,
         kidNames: kidNames,
       ),
     );
   }
 
   void _showAddDialog(BuildContext context, UserModel user, String familyId) {
-    final kidInfos = _kids.map((k) => _KidInfo(uid: k.uid, name: k.displayName)).toList();
+    final kidInfos = _students.map((k) => _KidInfo(uid: k.uid, name: k.displayName)).toList();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -352,13 +471,13 @@ class _AssignmentCard extends StatelessWidget {
   final AssignmentModel assignment;
   final UserModel user;
   final FirebaseFirestore db;
-  final bool isKidView;
+  final bool isStudentView;
   final Map<String, String> kidNames; // uid → name
   const _AssignmentCard({
     required this.assignment,
     required this.user,
     required this.db,
-    required this.isKidView,
+    required this.isStudentView,
     this.kidNames = const {},
   });
 
@@ -788,7 +907,7 @@ class _WeeklyViewState extends State<_WeeklyView> {
                                     assignment: a,
                                     user: widget.user,
                                     db: widget.db,
-                                    isKidView: false,
+                                    isStudentView: false,
                                     kidNames: widget.kidNames,
                                   ))
                               .toList(),

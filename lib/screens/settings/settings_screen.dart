@@ -101,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 16),
 
-            // Kids section for parents
+            // Students section for parents
             if (user.isParent) ...[
               _buildSection(
                 context,
@@ -109,7 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icons.family_restroom,
                 AppTheme.navy,
                 [
-                  ...auth.kids.map((kid) => ListTile(
+                  ...auth.students.map((kid) => ListTile(
                         leading: CircleAvatar(
                           backgroundColor: AppTheme.gold
                               .withValues(alpha: 0.15),
@@ -138,7 +138,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: const Icon(Icons.person_add,
                           color: AppTheme.navy, size: 22),
                     ),
-                    title: const Text('Add Kid Account'),
+                    title: const Text('Add Student Account'),
                     trailing: const Icon(Icons.add,
                         color: AppTheme.navy, size: 20),
                     onTap: () => _showAddKidDialog(context),
@@ -283,7 +283,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Kid Account'),
+          title: const Text('Add Student Account'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -298,7 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: nameCtrl,
                   textCapitalization: TextCapitalization.words,
                   decoration:
-                      const InputDecoration(labelText: "Kid's Name *"),
+                      const InputDecoration(labelText: "Student's Name *"),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -343,7 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (nameCtrl.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                        content: Text('Please enter the kid\'s name'),
+                        content: Text('Please enter the student\'s name'),
                         backgroundColor: AppTheme.error,
                         behavior: SnackBarBehavior.floating),
                   );
@@ -360,7 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SnackBar(
                       content: Text(success
                           ? '${nameCtrl.text.trim()} added successfully!'
-                          : auth.errorMessage ?? 'Failed to add kid'),
+                          : auth.errorMessage ?? 'Failed to add student'),
                       backgroundColor:
                           success ? AppTheme.success : AppTheme.error,
                       behavior: SnackBarBehavior.floating,
@@ -373,7 +373,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       width: 18, height: 18,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
-                  : const Text('Add Kid'),
+                  : const Text('Add Student'),
             ),
           ],
         ),
