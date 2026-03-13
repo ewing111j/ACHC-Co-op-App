@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
+import '../../services/notification_prefs_service.dart';
 import '../moodle/moodle_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -15,6 +16,24 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  Map<String, bool> _notifPrefs = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifPrefs();
+  }
+
+  Future<void> _loadNotifPrefs() async {
+    final prefs = await NotificationPrefsService.loadPrefs();
+    if (mounted) setState(() => _notifPrefs = prefs);
+  }
+
+  Future<void> _setNotifPref(String key, bool value) async {
+    await NotificationPrefsService.setPref(key, value);
+    await _loadNotifPrefs();
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -188,15 +207,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Icons.account_circle_outlined,
               AppTheme.textSecondary,
               [
-                ListTile(
-                  leading: const Icon(Icons.notifications_outlined),
-                  title: const Text('Notifications'),
-                  trailing: Switch(
-                    value: true,
-                    onChanged: (_) {},
-                    activeTrackColor: AppTheme.navy,
+                // ── Notification Badge Settings ──
+                if (!user.isStudent) ...[
+                  ListTile(
+                    leading: const Icon(Icons.notifications_outlined,
+                        color: AppTheme.navy),
+                    title: const Text('Notification Badges'),
+                    subtitle: const Text('Choose which sections show a badge'),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                    onTap: () => _showNotifSettings(context),
                   ),
-                ),
+                  const Divider(height: 1, indent: 72),
+                ],
                 ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('About ACHC Hub'),
@@ -255,6 +277,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(children: children),
         ),
       ],
+    );
+  }
+
+  void _showNotifSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _NotifSettingsSheet(
+        prefs: Map.from(_notifPrefs),
+        onChanged: _setNotifPref,
+      ),
     );
   }
 
@@ -530,4 +564,142 @@ class _StudentTileState extends State<_StudentTile> {
       ),
     );
   }
+}
+
+// ── Notification Settings Sheet ────────────────────────────────────
+class _NotifSettingsSheet extends StatefulWidget {
+  final Map<String, bool> prefs;
+  final Future<void> Function(String key, bool value) onChanged;
+  const _NotifSettingsSheet({required this.prefs, required this.onChanged});
+
+  @override
+  State<_NotifSettingsSheet> createState() => _NotifSettingsSheetState();
+}
+
+class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
+  late Map<String, bool> _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefs = Map.from(widget.prefs);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      _NotifItem('Assignments', Icons.assignment_outlined,
+          AppTheme.assignmentsColor, NotificationPrefsService.keyAssignments),
+      _NotifItem('Messages', Icons.chat_bubble_outline,
+          AppTheme.messagesColor, NotificationPrefsService.keyMessages),
+      _NotifItem('Calendar Events', Icons.calendar_today_outlined,
+          AppTheme.calendarColor, NotificationPrefsService.keyCalendar),
+      _NotifItem('Files', Icons.folder_outlined,
+          AppTheme.filesColor, NotificationPrefsService.keyFiles),
+      _NotifItem('Announcements (always on)', Icons.campaign_outlined,
+          AppTheme.feedsColor, NotificationPrefsService.keyFeedAnnouncements,
+          locked: true),
+      _NotifItem('Social Feed', Icons.people_outline,
+          AppTheme.photosColor, NotificationPrefsService.keyFeedSocial),
+      _NotifItem('Prayer Feed', Icons.volunteer_activism_outlined,
+          AppTheme.prayerColor, NotificationPrefsService.keyFeedPrayer),
+      _NotifItem('Photos', Icons.photo_library_outlined,
+          AppTheme.photosColor, NotificationPrefsService.keyPhotos),
+    ];
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      maxChildSize: 0.9,
+      minChildSize: 0.4,
+      builder: (_, ctrl) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications_outlined,
+                      size: 22, color: AppTheme.navy),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('Notification Badge Settings',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'Georgia')),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Choose which sections show a badge counter on the home screen. '
+                'Long-press any home tile to clear its badge.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                controller: ctrl,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: items.length,
+                itemBuilder: (_, i) {
+                  final item = items[i];
+                  final isOn = _prefs[item.key] ?? false;
+                  return ListTile(
+                    leading: Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: item.color.withValues(alpha: 0.1),
+                      ),
+                      child: Icon(item.icon, color: item.color, size: 18),
+                    ),
+                    title: Text(item.label,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w500)),
+                    trailing: Switch(
+                      value: isOn,
+                      onChanged: item.locked
+                          ? null
+                          : (v) async {
+                              setState(() => _prefs[item.key] = v);
+                              await widget.onChanged(item.key, v);
+                            },
+                      activeTrackColor: item.color,
+                      activeThumbColor: item.color,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NotifItem {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final String key;
+  final bool locked;
+  const _NotifItem(this.label, this.icon, this.color, this.key,
+      {this.locked = false});
 }

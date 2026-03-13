@@ -945,6 +945,7 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
   final _titleCtrl = TextEditingController();
   final _courseCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _repeatUntilCtrl = TextEditingController();
   DateTime _dueDate = DateTime.now().add(const Duration(days: 7));
   bool _isOptional = false;
   String _assignTo = 'all';
@@ -952,15 +953,27 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
 
   // Repeat
   String _repeatMode = 'none'; // none | daily | weekly | custom
+  // Mon–Sat (1=Mon … 6=Sat); Sun omitted per spec but can be added as 7
   final Map<int, bool> _repeatDays = {
     1: false, // Mon
     2: false, // Tue
     3: false, // Wed
     4: false, // Thu
     5: false, // Fri
+    6: false, // Sat
   };
+  DateTime? _repeatUntilDate; // null = use default (next June 1)
 
   bool get _isEdit => widget.editAssignment != null;
+
+  /// Default end date: next June 1 (school-year end)
+  DateTime get _defaultRepeatUntil {
+    final now = DateTime.now();
+    final june1 = DateTime(now.year, 6, 1);
+    return june1.isAfter(now) ? june1 : DateTime(now.year + 1, 6, 1);
+  }
+
+  DateTime get _effectiveUntil => _repeatUntilDate ?? _defaultRepeatUntil;
 
   @override
   void initState() {
@@ -981,12 +994,12 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
     _titleCtrl.dispose();
     _courseCtrl.dispose();
     _descCtrl.dispose();
+    _repeatUntilCtrl.dispose();
     super.dispose();
   }
 
-  static const _dayLabels = {1: 'M', 2: 'T', 3: 'W', 4: 'Th', 5: 'F'};
-  static const _dayFullLabels = {
-    1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri'
+  static const _dayLabels = {
+    1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat',
   };
 
   @override
@@ -1002,7 +1015,9 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Header ──
               Row(
                 children: [
                   Text(_isEdit ? 'Edit Assignment' : 'Add Assignment',
@@ -1017,12 +1032,16 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                 ],
               ),
               const SizedBox(height: 12),
+
+              // ── Title ──
               TextField(
                 controller: _titleCtrl,
                 decoration: const InputDecoration(
                     labelText: 'Title *', border: OutlineInputBorder()),
               ),
               const SizedBox(height: 10),
+
+              // ── Course ──
               TextField(
                 controller: _courseCtrl,
                 decoration: const InputDecoration(
@@ -1030,6 +1049,8 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                     border: OutlineInputBorder()),
               ),
               const SizedBox(height: 10),
+
+              // ── Description ──
               TextField(
                 controller: _descCtrl,
                 decoration: const InputDecoration(
@@ -1040,7 +1061,8 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                 minLines: 2,
               ),
               const SizedBox(height: 10),
-              // Due date
+
+              // ── Due date ──
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('Due: ${DateFormat('MMM d, y').format(_dueDate)}',
@@ -1053,12 +1075,13 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                     initialDate: _dueDate,
                     firstDate:
                         DateTime.now().subtract(const Duration(days: 1)),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                    lastDate: DateTime.now().add(const Duration(days: 730)),
                   );
                   if (p != null) setState(() => _dueDate = p);
                 },
               ),
-              // Optional toggle
+
+              // ── Optional toggle ──
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Row(
@@ -1083,7 +1106,8 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                 activeThumbColor: AppTheme.optionalGreen,
                 onChanged: (v) => setState(() => _isOptional = v),
               ),
-              // Assign to
+
+              // ── Assign to ──
               if (widget.kids.isNotEmpty)
                 DropdownButtonFormField<String>(
                   initialValue: _assignTo,
@@ -1092,16 +1116,20 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                       border: OutlineInputBorder()),
                   items: [
                     const DropdownMenuItem(
-                        value: 'all', child: Text('All Kids')),
+                        value: 'all', child: Text('All Students')),
                     ...widget.kids.map((k) => DropdownMenuItem(
                         value: k.uid, child: Text(k.name))),
                   ],
                   onChanged: (v) => setState(() => _assignTo = v ?? 'all'),
                 ),
               const SizedBox(height: 12),
-              // Repeat section (add mode only)
+
+              // ── Repeat section (add mode only) ──
               if (!_isEdit) ...[
                 const Divider(),
+                const SizedBox(height: 4),
+
+                // Repeat dropdown row
                 Row(
                   children: [
                     const Text('Repeat',
@@ -1112,18 +1140,25 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                       value: _repeatMode,
                       underline: const SizedBox(),
                       items: const [
-                        DropdownMenuItem(value: 'none', child: Text('No Repeat')),
-                        DropdownMenuItem(value: 'daily', child: Text('Daily (M–F)')),
-                        DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                        DropdownMenuItem(value: 'custom', child: Text('Custom Days')),
+                        DropdownMenuItem(
+                            value: 'none', child: Text('No Repeat')),
+                        DropdownMenuItem(
+                            value: 'daily', child: Text('Daily (M–F)')),
+                        DropdownMenuItem(
+                            value: 'weekly', child: Text('Weekly')),
+                        DropdownMenuItem(
+                            value: 'custom', child: Text('Custom Days')),
                       ],
                       onChanged: (v) {
                         setState(() {
                           _repeatMode = v ?? 'none';
                           if (v == 'daily') {
-                            for (final k in _repeatDays.keys) {
-                              _repeatDays[k] = true;
-                            }
+                            _repeatDays[1] = true;
+                            _repeatDays[2] = true;
+                            _repeatDays[3] = true;
+                            _repeatDays[4] = true;
+                            _repeatDays[5] = true;
+                            _repeatDays[6] = false;
                           } else if (v != 'custom') {
                             for (final k in _repeatDays.keys) {
                               _repeatDays[k] = false;
@@ -1134,56 +1169,98 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                     ),
                   ],
                 ),
-                if (_repeatMode == 'custom')
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+
+                // Custom Days — CheckboxListTile Mon–Sat
+                if (_repeatMode == 'custom') ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.cardBorder),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
                       children: _repeatDays.keys.map((day) {
-                        final selected = _repeatDays[day]!;
-                        return GestureDetector(
-                          onTap: () =>
-                              setState(() => _repeatDays[day] = !selected),
-                          child: Container(
-                            width: 40, height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: selected
-                                  ? AppTheme.assignmentsColor
-                                  : AppTheme.surfaceVariant,
-                              border: Border.all(
-                                  color: selected
-                                      ? AppTheme.assignmentsColor
-                                      : AppTheme.cardBorder),
-                            ),
-                            child: Center(
-                              child: Text(_dayLabels[day]!,
-                                  style: TextStyle(
-                                      color: selected
-                                          ? Colors.white
-                                          : AppTheme.textSecondary,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700)),
-                            ),
-                          ),
+                        return CheckboxListTile(
+                          dense: true,
+                          title: Text(_dayLabels[day]!,
+                              style: const TextStyle(fontSize: 14)),
+                          value: _repeatDays[day]!,
+                          activeColor: AppTheme.assignmentsColor,
+                          onChanged: (v) =>
+                              setState(() => _repeatDays[day] = v ?? false),
                         );
                       }).toList(),
                     ),
                   ),
-                if (_repeatMode != 'none')
+                  // Validation hint
+                  if (_repeatDays.values.every((v) => !v))
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4, left: 4),
+                      child: Text('Select at least one day',
+                          style: TextStyle(
+                              fontSize: 11, color: AppTheme.error)),
+                    ),
+                ],
+
+                // ── Repeat Until section ──
+                if (_repeatMode != 'none') ...[
+                  const SizedBox(height: 14),
+                  const Text('Repeat Until',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 14)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _repeatUntilCtrl,
+                          keyboardType: TextInputType.datetime,
+                          decoration: InputDecoration(
+                            hintText: 'MM/DD/YYYY  (default: ${DateFormat('MM/dd/yyyy').format(_defaultRepeatUntil)})',
+                            hintStyle: const TextStyle(fontSize: 12),
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                          ),
+                          onChanged: (_) => _parseUntilFromTextField(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.calendar_month_outlined,
+                            color: AppTheme.navy),
+                        tooltip: 'Pick end date',
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _effectiveUntil,
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now()
+                                .add(const Duration(days: 730)),
+                          );
+                          if (picked != null) {
+                            setState(() {
+                              _repeatUntilDate = picked;
+                              _repeatUntilCtrl.text =
+                                  DateFormat('MM/dd/yyyy').format(picked);
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      _repeatMode == 'weekly'
-                          ? 'Creates a task every week on ${_dayFullLabels[_dueDate.weekday] ?? 'same day'}'
-                          : _repeatMode == 'daily'
-                              ? 'Creates tasks Mon–Fri for 4 weeks'
-                              : 'Creates tasks on selected days for 4 weeks',
+                      'Generates instances up to ${DateFormat('MMM d, y').format(_effectiveUntil)}',
                       style: const TextStyle(
                           fontSize: 12, color: AppTheme.textHint),
                     ),
                   ),
+                ],
               ],
+
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -1191,7 +1268,8 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
                   onPressed: _saving ? null : _save,
                   style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.assignmentsColor,
-                      padding: const EdgeInsets.symmetric(vertical: 14)),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 14)),
                   child: _saving
                       ? const CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2)
@@ -1205,12 +1283,63 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
     );
   }
 
+  void _parseUntilFromTextField() {
+    final text = _repeatUntilCtrl.text.trim();
+    if (text.isEmpty) {
+      setState(() => _repeatUntilDate = null);
+      return;
+    }
+    try {
+      final parsed = DateFormat('MM/dd/yyyy').parseStrict(text);
+      setState(() => _repeatUntilDate = parsed);
+    } catch (_) {
+      // Will validate on save
+    }
+  }
+
   Future<void> _save() async {
-    if (_titleCtrl.text.trim().isEmpty) return;
+    if (_titleCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please enter a title'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    // Validate custom days selection
+    if (!_isEdit && _repeatMode == 'custom' &&
+        _repeatDays.values.every((v) => !v)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Please select at least one day for Custom Days'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    // Validate manual date entry if typed
+    if (!_isEdit && _repeatMode != 'none' &&
+        _repeatUntilCtrl.text.isNotEmpty) {
+      try {
+        DateFormat('MM/dd/yyyy').parseStrict(_repeatUntilCtrl.text.trim());
+      } catch (_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Invalid date format. Please use MM/DD/YYYY (e.g. 06/01/2025)'),
+              backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating),
+        );
+        return;
+      }
+    }
+
     setState(() => _saving = true);
     try {
       if (_isEdit) {
-        // Update existing
         await widget.db
             .collection('assignments')
             .doc(widget.editAssignment!.id)
@@ -1225,36 +1354,56 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
           'assignedTo': _assignTo,
         });
       } else {
-        // Build list of dates based on repeat
         final dates = _buildDates();
-        final batch = widget.db.batch();
-        for (final date in dates) {
-          final ref = widget.db.collection('assignments').doc();
-          batch.set(ref, {
-            'title': _titleCtrl.text.trim(),
-            'description': _descCtrl.text.trim(),
-            'courseName': _courseCtrl.text.trim().isEmpty
-                ? 'General'
-                : _courseCtrl.text.trim(),
-            'courseId': 'manual',
-            'dueDate': Timestamp.fromDate(date),
-            'status': 'pending',
-            'isOptional': _isOptional,
-            'fromMoodle': false,
-            'assignedTo': _assignTo,
-            'familyId': widget.familyId,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+        if (dates.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('No dates generated — check your repeat settings'),
+                backgroundColor: AppTheme.error,
+                behavior: SnackBarBehavior.floating),
+          );
+          setState(() => _saving = false);
+          return;
         }
-        await batch.commit();
+
+        // Firestore batch is limited to 500; chunk if needed
+        const batchLimit = 400;
+        for (int i = 0; i < dates.length; i += batchLimit) {
+          final chunk = dates.sublist(
+              i, i + batchLimit > dates.length ? dates.length : i + batchLimit);
+          final batch = widget.db.batch();
+          for (final date in chunk) {
+            final ref = widget.db.collection('assignments').doc();
+            batch.set(ref, {
+              'title': _titleCtrl.text.trim(),
+              'description': _descCtrl.text.trim(),
+              'courseName': _courseCtrl.text.trim().isEmpty
+                  ? 'General'
+                  : _courseCtrl.text.trim(),
+              'courseId': 'manual',
+              'dueDate': Timestamp.fromDate(date),
+              'status': 'pending',
+              'isOptional': _isOptional,
+              'fromMoodle': false,
+              'assignedTo': _assignTo,
+              'familyId': widget.familyId,
+              'createdAt': FieldValue.serverTimestamp(),
+              'repeatUntil': _repeatMode != 'none'
+                  ? Timestamp.fromDate(_effectiveUntil)
+                  : null,
+            });
+          }
+          await batch.commit();
+        }
       }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: AppTheme.error),
+              content: Text('Error saving assignment: $e'),
+              backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating),
         );
       }
     } finally {
@@ -1262,35 +1411,36 @@ class _AddAssignmentSheetState extends State<_AddAssignmentSheet> {
     }
   }
 
+  /// Generates all due-dates based on repeat settings, stopping at [_effectiveUntil].
   List<DateTime> _buildDates() {
     if (_repeatMode == 'none') return [_dueDate];
 
+    final until = _effectiveUntil;
     final dates = <DateTime>[];
+
     if (_repeatMode == 'weekly') {
-      // Same weekday, 4 consecutive weeks
-      for (int w = 0; w < 4; w++) {
-        dates.add(_dueDate.add(Duration(days: w * 7)));
+      // Same weekday each week until end date
+      var current = _dueDate;
+      while (!current.isAfter(until)) {
+        dates.add(current);
+        current = current.add(const Duration(days: 7));
       }
     } else {
-      // daily or custom — 4 weeks worth of selected days
+      // daily or custom — iterate day-by-day from _dueDate to until
       final activeDays = _repeatMode == 'daily'
-          ? [1, 2, 3, 4, 5]
+          ? [1, 2, 3, 4, 5] // Mon–Fri
           : _repeatDays.entries
               .where((e) => e.value)
               .map((e) => e.key)
               .toList();
       if (activeDays.isEmpty) return [_dueDate];
 
-      // Start from the week containing _dueDate
-      final startDay = _dueDate;
-      final monday = startDay.subtract(Duration(days: startDay.weekday - 1));
-      for (int w = 0; w < 4; w++) {
-        for (final dayNum in activeDays) {
-          final date = monday.add(Duration(days: (w * 7) + (dayNum - 1)));
-          if (!date.isBefore(startDay.subtract(const Duration(days: 1)))) {
-            dates.add(date);
-          }
+      var current = _dueDate;
+      while (!current.isAfter(until)) {
+        if (activeDays.contains(current.weekday)) {
+          dates.add(current);
         }
+        current = current.add(const Duration(days: 1));
       }
     }
     return dates.isNotEmpty ? dates : [_dueDate];

@@ -26,6 +26,8 @@ class _MessagesScreenState extends State<MessagesScreen>
   final _db = FirebaseFirestore.instance;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
+  int _groupUnread = 0;
+  int _personalUnread = 0;
 
   @override
   void initState() {
@@ -62,9 +64,21 @@ class _MessagesScreenState extends State<MessagesScreen>
             children: [
               TabBar(
                 controller: _tabController,
-                tabs: const [
-                  Tab(icon: Icon(Icons.school_outlined, size: 18), text: 'Groups'),
-                  Tab(icon: Icon(Icons.chat_bubble_outline, size: 18), text: 'Personal'),
+                tabs: [
+                  Tab(
+                    child: _MsgTabLabel(
+                      icon: Icons.school_outlined,
+                      text: 'Groups',
+                      unread: _groupUnread,
+                    ),
+                  ),
+                  Tab(
+                    child: _MsgTabLabel(
+                      icon: Icons.chat_bubble_outline,
+                      text: 'Personal',
+                      unread: _personalUnread,
+                    ),
+                  ),
                 ],
               ),
               // Intelligent search bar
@@ -116,8 +130,22 @@ class _MessagesScreenState extends State<MessagesScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _GroupsTab(user: user, db: _db, searchQuery: _searchQuery),
-          _PersonalTab(user: user, db: _db, searchQuery: _searchQuery),
+          _GroupsTab(
+            user: user,
+            db: _db,
+            searchQuery: _searchQuery,
+            onUnreadChanged: (c) {
+              if (mounted) setState(() => _groupUnread = c);
+            },
+          ),
+          _PersonalTab(
+            user: user,
+            db: _db,
+            searchQuery: _searchQuery,
+            onUnreadChanged: (c) {
+              if (mounted) setState(() => _personalUnread = c);
+            },
+          ),
         ],
       ),
     );
@@ -138,6 +166,43 @@ class _MessagesScreenState extends State<MessagesScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _NewPersonalChatSheet(user: user, db: _db),
+    );
+  }
+}
+
+// ── Messages tab label with unread badge ──────────────────────────
+class _MsgTabLabel extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final int unread;
+  const _MsgTabLabel({required this.icon, required this.text, required this.unread});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 4),
+        Text(text, style: const TextStyle(fontSize: 12)),
+        if (unread > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppTheme.error,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              unread > 99 ? '99+' : '$unread',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -170,8 +235,13 @@ class _GroupsTab extends StatelessWidget {
   final UserModel user;
   final FirebaseFirestore db;
   final String searchQuery;
-  const _GroupsTab(
-      {required this.user, required this.db, required this.searchQuery});
+  final void Function(int count) onUnreadChanged;
+  const _GroupsTab({
+    required this.user,
+    required this.db,
+    required this.searchQuery,
+    required this.onUnreadChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +273,15 @@ class _GroupsTab extends StatelessWidget {
           if (aT == null) return 1;
           if (bT == null) return -1;
           return (bT as Timestamp).compareTo(aT as Timestamp);
+        });
+
+        // Count total unread across all group rooms
+        final totalUnread = sorted.fold<int>(0, (sum, d) {
+          final unread = (d.data() as Map)['unread_${user.uid}'] as int? ?? 0;
+          return sum + unread;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          onUnreadChanged(totalUnread);
         });
 
         // Filter by search
@@ -315,8 +394,13 @@ class _PersonalTab extends StatelessWidget {
   final UserModel user;
   final FirebaseFirestore db;
   final String searchQuery;
-  const _PersonalTab(
-      {required this.user, required this.db, required this.searchQuery});
+  final void Function(int count) onUnreadChanged;
+  const _PersonalTab({
+    required this.user,
+    required this.db,
+    required this.searchQuery,
+    required this.onUnreadChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -339,6 +423,15 @@ class _PersonalTab extends StatelessWidget {
           if (aT == null) return 1;
           if (bT == null) return -1;
           return (bT as Timestamp).compareTo(aT as Timestamp);
+        });
+
+        // Count total unread across personal rooms
+        final totalUnread = sorted.fold<int>(0, (sum, d) {
+          final unread = (d.data() as Map)['unread_${user.uid}'] as int? ?? 0;
+          return sum + unread;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          onUnreadChanged(totalUnread);
         });
 
         final filtered = _rankBySearch(

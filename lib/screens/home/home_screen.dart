@@ -374,15 +374,6 @@ class _HomeScreenState extends State<HomeScreen> {
         Row(
           children: [
             AppTheme.sectionHeader('Quick Access'),
-            const Spacer(),
-            if (!user.isStudent)
-              TextButton.icon(
-                onPressed: () => _showNotifSettings(context),
-                icon: const Icon(Icons.notifications_outlined, size: 16),
-                label: const Text('Badges', style: TextStyle(fontSize: 12)),
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8)),
-              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -601,22 +592,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (h < 12) return 'Good morning';
     if (h < 17) return 'Good afternoon';
     return 'Good evening';
-  }
-
-  // ── Notification Settings Sheet ────────────────────────────────
-  void _showNotifSettings(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _NotifSettingsSheet(
-        prefs: Map.from(_notifPrefs),
-        onChanged: (key, value) async {
-          await NotificationPrefsService.setPref(key, value);
-          await _loadPrefs();
-        },
-      ),
-    );
   }
 
   void _showClearBadgeMenu(BuildContext context, String label, String seenKey) {

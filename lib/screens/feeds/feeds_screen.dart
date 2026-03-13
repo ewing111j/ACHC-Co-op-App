@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/feed_model.dart';
 import '../../models/user_model.dart';
@@ -27,6 +28,16 @@ class _FeedsScreenState extends State<FeedsScreen>
   final _firestoreService = FirestoreService();
   final _db = FirebaseFirestore.instance;
 
+  // Per-tab last-seen timestamps (feeds sub-keys)
+  int _announceTs = 0;
+  int _socialTs = 0;
+  int _prayerTs = 0;
+
+  // Unread counts per tab (computed via StreamBuilders, shown in tab badges)
+  int _announceCount = 0;
+  int _socialCount = 0;
+  int _prayerCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -35,10 +46,69 @@ class _FeedsScreenState extends State<FeedsScreen>
       vsync: this,
       initialIndex: widget.initialTab,
     );
+    _loadLastSeen();
+    // Mark current tab as seen when user switches to it
+    _tabController.addListener(_onTabChanged);
+  }
+
+  Future<void> _loadLastSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _announceTs = prefs.getInt('lastseen_feeds_announce') ?? 0;
+        _socialTs   = prefs.getInt('lastseen_feeds_social')   ?? 0;
+        _prayerTs   = prefs.getInt('lastseen_feeds_prayer')   ?? 0;
+      });
+      // Mark the initial tab as seen right away
+      _markTabSeen(_tabController.index);
+    }
+  }
+
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging) {
+      _markTabSeen(_tabController.index);
+    }
+  }
+
+  Future<void> _markTabSeen(int index) async {
+    final prefs = await SharedPreferences.getInstance();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    switch (index) {
+      case 0:
+        await prefs.setInt('lastseen_feeds_announce', ts);
+        if (mounted) setState(() { _announceTs = ts; _announceCount = 0; });
+        break;
+      case 1:
+        await prefs.setInt('lastseen_feeds_social', ts);
+        if (mounted) setState(() { _socialTs = ts; _socialCount = 0; });
+        break;
+      case 2:
+        await prefs.setInt('lastseen_feeds_prayer', ts);
+        if (mounted) setState(() { _prayerTs = ts; _prayerCount = 0; });
+        break;
+    }
+  }
+
+  void _setCount(FeedType type, int count) {
+    if (!mounted) return;
+    setState(() {
+      switch (type) {
+        case FeedType.announcement:
+          _announceCount = count;
+          break;
+        case FeedType.social:
+          _socialCount = count;
+          break;
+        case FeedType.prayer:
+          _prayerCount = count;
+          break;
+      }
+    });
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -57,19 +127,49 @@ class _FeedsScreenState extends State<FeedsScreen>
         ),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.campaign_outlined, size: 18), text: 'Announce'),
-            Tab(icon: Icon(Icons.people_outline, size: 18), text: 'Social'),
-            Tab(icon: Icon(Icons.volunteer_activism_outlined, size: 18), text: 'Prayer'),
+          tabs: [
+            Tab(
+              child: _TabLabel(
+                icon: Icons.campaign_outlined,
+                text: 'Announce',
+                badgeCount: _announceCount,
+              ),
+            ),
+            Tab(
+              child: _TabLabel(
+                icon: Icons.people_outline,
+                text: 'Social',
+                badgeCount: _socialCount,
+              ),
+            ),
+            Tab(
+              child: _TabLabel(
+                icon: Icons.volunteer_activism_outlined,
+                text: 'Prayer',
+                badgeCount: _prayerCount,
+              ),
+            ),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          _FeedTab(type: FeedType.announcement, user: user, db: _db),
-          _FeedTab(type: FeedType.social, user: user, db: _db),
-          _FeedTab(type: FeedType.prayer, user: user, db: _db),
+          _FeedTab(
+            type: FeedType.announcement, user: user, db: _db,
+            lastSeenTs: _announceTs,
+            onCountChanged: (c) => _setCount(FeedType.announcement, c),
+          ),
+          _FeedTab(
+            type: FeedType.social, user: user, db: _db,
+            lastSeenTs: _socialTs,
+            onCountChanged: (c) => _setCount(FeedType.social, c),
+          ),
+          _FeedTab(
+            type: FeedType.prayer, user: user, db: _db,
+            lastSeenTs: _prayerTs,
+            onCountChanged: (c) => _setCount(FeedType.prayer, c),
+          ),
         ],
       ),
       floatingActionButton: _canPost(user, _currentType)
@@ -110,12 +210,57 @@ class _FeedsScreenState extends State<FeedsScreen>
   }
 }
 
+// ── Tab label with badge ──────────────────────────────────────────
+class _TabLabel extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final int badgeCount;
+  const _TabLabel({required this.icon, required this.text, required this.badgeCount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16),
+        const SizedBox(width: 4),
+        Text(text, style: const TextStyle(fontSize: 12)),
+        if (badgeCount > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppTheme.error,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              badgeCount > 99 ? '99+' : '$badgeCount',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 // ── Per-Tab Feed List ─────────────────────────────────────────────
 class _FeedTab extends StatelessWidget {
   final FeedType type;
   final UserModel user;
   final FirebaseFirestore db;
-  const _FeedTab({required this.type, required this.user, required this.db});
+  final int lastSeenTs;
+  final void Function(int count) onCountChanged;
+  const _FeedTab({
+    required this.type,
+    required this.user,
+    required this.db,
+    required this.lastSeenTs,
+    required this.onCountChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -155,6 +300,19 @@ class _FeedTab extends StatelessWidget {
           final bMs = (bT as Timestamp).millisecondsSinceEpoch;
           return bMs.compareTo(aMs);
         });
+
+        // Calculate unread count and notify parent
+        if (lastSeenTs > 0) {
+          final unread = sorted.where((d) {
+            final ts = (d.data() as Map)['createdAt'];
+            if (ts == null) return false;
+            return (ts as Timestamp).millisecondsSinceEpoch > lastSeenTs;
+          }).length;
+          // Schedule callback after build
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            onCountChanged(unread);
+          });
+        }
 
         if (sorted.isEmpty) {
           return _EmptyFeed(type: type);
