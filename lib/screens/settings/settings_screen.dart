@@ -7,6 +7,7 @@ import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
 import '../../services/notification_prefs_service.dart';
 import '../moodle/moodle_setup_screen.dart';
+import 'claim_student_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -146,6 +147,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: const Icon(Icons.add,
                         color: AppTheme.navy, size: 20),
                     onTap: () => _showAddKidDialog(context),
+                  ),
+                  ListTile(
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.classesColor.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.link,
+                          color: AppTheme.classesColor, size: 22),
+                    ),
+                    title: const Text('Claim Imported Student'),
+                    subtitle: const Text(
+                        'Link an existing student account to your family',
+                        style: TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.arrow_forward_ios,
+                        size: 14, color: AppTheme.textSecondary),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              ClaimStudentScreen(parentUser: user)),
+                    ),
                   ),
                 ],
               ),

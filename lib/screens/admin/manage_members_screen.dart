@@ -1,9 +1,13 @@
 // lib/screens/admin/manage_members_screen.dart
-// Admin can add members to any group/class/committee, assign mentor/second roles.
-// Students auto-join classes; creating a new class adds the student immediately.
+// Admin: manage users, enroll students in Classes, enroll parents in Group Chats
+// Terminology:
+//   • Classes (Firestore: 'classes' collection) → for students only
+//   • Groups/Committees (Firestore: 'chatRooms' w/ roomType='committee') → for parents; also includes mentors+admins
+//   • 'mentor_group' type is REMOVED — use class | committee | other
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../utils/app_theme.dart';
+import '../../models/user_model.dart';
 
 class ManageMembersScreen extends StatefulWidget {
   final String? highlightUid;
@@ -13,13 +17,23 @@ class ManageMembersScreen extends StatefulWidget {
   State<ManageMembersScreen> createState() => _ManageMembersScreenState();
 }
 
-class _ManageMembersScreenState extends State<ManageMembersScreen> {
+class _ManageMembersScreenState extends State<ManageMembersScreen>
+    with SingleTickerProviderStateMixin {
   final _db = FirebaseFirestore.instance;
   final _searchCtrl = TextEditingController();
   String _filter = '';
+  late TabController _tabCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 3, vsync: this);
+    _searchCtrl.addListener(() => setState(() => _filter = _searchCtrl.text.toLowerCase()));
+  }
 
   @override
   void dispose() {
+    _tabCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -38,13 +52,25 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.group_add_outlined),
-            tooltip: 'Create New Group/Class',
+            tooltip: 'Create Group Chat',
             onPressed: () => _showCreateGroupDialog(context),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabCtrl,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white60,
+          indicatorColor: AppTheme.gold,
+          tabs: const [
+            Tab(text: 'Students'),
+            Tab(text: 'Parents'),
+            Tab(text: 'All'),
+          ],
+        ),
       ),
       body: Column(
         children: [
+          // Search
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -52,115 +78,63 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
               decoration: InputDecoration(
                 hintText: 'Search members…',
                 prefixIcon: const Icon(Icons.search, size: 18),
+                suffixIcon: _filter.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 16),
+                        onPressed: () => _searchCtrl.clear())
+                    : null,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10)),
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
                 filled: true,
                 fillColor: AppTheme.surface,
               ),
-              onChanged: (v) => setState(() => _filter = v.toLowerCase()),
             ),
           ),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _db.collection('users').snapshots(),
-              builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                var docs = snap.data?.docs ?? [];
-                if (_filter.isNotEmpty) {
-                  docs = docs.where((d) {
-                    final data = d.data() as Map<String, dynamic>;
-                    final name = (data['displayName'] as String? ?? '').toLowerCase();
-                    final email = (data['email'] as String? ?? '').toLowerCase();
-                    return name.contains(_filter) || email.contains(_filter);
-                  }).toList();
-                }
-                if (docs.isEmpty) {
-                  return const Center(
-                    child: Text('No members found',
-                        style: TextStyle(color: AppTheme.textHint)),
-                  );
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: docs.length,
-                  itemBuilder: (_, i) {
-                    final data = docs[i].data() as Map<String, dynamic>;
-                    final uid = docs[i].id;
-                    final name = data['displayName'] as String? ?? 'Unknown';
-                    final email = data['email'] as String? ?? '';
-                    final role = data['role'] as String? ?? 'parent';
-                    final isHighlighted = uid == widget.highlightUid;
-                    final isStudent = role == 'student' || role == 'kid';
-                    final roleColor = role == 'admin'
-                        ? const Color(0xFF7B1FA2)
-                        : isStudent
-                            ? AppTheme.gold
-                            : AppTheme.navy;
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        color: isHighlighted
-                            ? AppTheme.navy.withValues(alpha: 0.06)
-                            : AppTheme.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isHighlighted
-                              ? AppTheme.navy.withValues(alpha: 0.3)
-                              : AppTheme.cardBorder,
-                        ),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              roleColor.withValues(alpha: 0.15),
-                          child: Text(
-                            name.isNotEmpty ? name[0].toUpperCase() : '?',
-                            style: TextStyle(
-                                color: roleColor,
-                                fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        title: Text(name,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 14)),
-                        subtitle: Text(email,
-                            style: const TextStyle(fontSize: 12)),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: roleColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                isStudent
-                                    ? 'STUDENT'
-                                    : role.toUpperCase(),
-                                style: TextStyle(
-                                    color: roleColor,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.chevron_right, size: 18,
-                                color: AppTheme.textHint),
-                          ],
-                        ),
-                        onTap: () => _openMemberGroups(context, uid, name,
-                            isStudent: isStudent),
-                      ),
-                    );
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [
+                // Students tab: can enroll in Classes
+                _UserList(
+                  db: _db,
+                  filter: _filter,
+                  roleFilter: ['student'],
+                  highlightUid: widget.highlightUid,
+                  onTap: (uid, name) => Navigator.push(context,
+                      MaterialPageRoute(
+                          builder: (_) => _StudentClassesScreen(
+                              uid: uid, name: name, db: _db))),
+                  emptyMessage: 'No students found',
+                ),
+                // Parents tab: can enroll in Group Chats (Committees)
+                _UserList(
+                  db: _db,
+                  filter: _filter,
+                  roleFilter: ['parent', 'mentor', 'admin'],
+                  highlightUid: widget.highlightUid,
+                  onTap: (uid, name) => Navigator.push(context,
+                      MaterialPageRoute(
+                          builder: (_) => _ParentGroupsScreen(
+                              uid: uid, name: name, db: _db))),
+                  emptyMessage: 'No parents/mentors found',
+                ),
+                // All tab
+                _UserList(
+                  db: _db,
+                  filter: _filter,
+                  roleFilter: null,
+                  highlightUid: widget.highlightUid,
+                  onTap: (uid, name) {
+                    // Route by role
+                    Navigator.push(context, MaterialPageRoute(builder: (_) {
+                      return _UniversalMemberScreen(
+                          uid: uid, name: name, db: _db);
+                    }));
                   },
-                );
-              },
+                  emptyMessage: 'No members found',
+                ),
+              ],
             ),
           ),
         ],
@@ -168,39 +142,23 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
     );
   }
 
-  // ── Open member group assignment screen ─────────────────────────
-  void _openMemberGroups(BuildContext context, String uid, String name,
-      {required bool isStudent}) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _MemberGroupsScreen(
-          uid: uid,
-          name: name,
-          isStudent: isStudent,
-        ),
-      ),
-    );
-  }
-
-  // ── Create new group / class dialog ────────────────────────────
   void _showCreateGroupDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
-    String groupType = 'class';
+    String groupType = 'committee';
     bool saving = false;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx2, setS) => AlertDialog(
-          title: const Text('Create New Group'),
+          title: const Text('Create Group Chat'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Group / Class Name',
+                  labelText: 'Group Name',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -210,14 +168,18 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
                 decoration: const InputDecoration(
                     labelText: 'Type', border: OutlineInputBorder()),
                 items: const [
-                  DropdownMenuItem(value: 'class', child: Text('Class')),
-                  DropdownMenuItem(
-                      value: 'committee', child: Text('Committee')),
-                  DropdownMenuItem(
-                      value: 'mentor_group', child: Text('Mentor Group')),
+                  DropdownMenuItem(value: 'committee', child: Text('Committee')),
+                  DropdownMenuItem(value: 'class', child: Text('Class Group')),
                   DropdownMenuItem(value: 'other', child: Text('Other')),
                 ],
                 onChanged: (v) => setS(() => groupType = v!),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This creates a permanent group chat. '
+                'To enroll students in a class for coursework, '
+                'use the Students tab.',
+                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               ),
             ],
           ),
@@ -231,6 +193,18 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
                   : () async {
                       if (nameCtrl.text.trim().isEmpty) return;
                       setS(() => saving = true);
+                      await _db.collection('chatRooms').add({
+                        'name': nameCtrl.text.trim(),
+                        'roomType': 'committee',
+                        'groupSubType': groupType,
+                        'isGroup': true,
+                        'members': [],
+                        'memberNames': [],
+                        'lastMessage': '',
+                        'lastMessageAt': FieldValue.serverTimestamp(),
+                        'createdAt': FieldValue.serverTimestamp(),
+                      });
+                      // Also create in 'groups' collection for attendance/admin
                       await _db.collection('groups').add({
                         'name': nameCtrl.text.trim(),
                         'type': groupType,
@@ -241,22 +215,19 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
                       });
                       if (ctx.mounted) {
                         Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                '${nameCtrl.text.trim()} created!'),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('${nameCtrl.text.trim()} created!'),
+                          backgroundColor: AppTheme.success,
+                        ));
                       }
                     },
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.navy),
               child: saving
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child:
-                          CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Create'),
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Create', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -265,21 +236,164 @@ class _ManageMembersScreenState extends State<ManageMembersScreen> {
   }
 }
 
-// ── Member Groups Assignment Screen ───────────────────────────────
-class _MemberGroupsScreen extends StatefulWidget {
-  final String uid;
-  final String name;
-  final bool isStudent;
-  const _MemberGroupsScreen(
-      {required this.uid, required this.name, required this.isStudent});
+// ── Reusable user list ────────────────────────────────────────────────────────
+class _UserList extends StatelessWidget {
+  final FirebaseFirestore db;
+  final String filter;
+  final List<String>? roleFilter; // null = all
+  final String? highlightUid;
+  final void Function(String uid, String name) onTap;
+  final String emptyMessage;
+
+  const _UserList({
+    required this.db,
+    required this.filter,
+    required this.roleFilter,
+    required this.onTap,
+    required this.emptyMessage,
+    this.highlightUid,
+  });
 
   @override
-  State<_MemberGroupsScreen> createState() => _MemberGroupsScreenState();
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: db.collection('users').snapshots(),
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        var docs = snap.data?.docs ?? [];
+
+        // Role filter
+        if (roleFilter != null) {
+          docs = docs.where((d) {
+            final role = (d.data() as Map)['role'] as String? ?? 'parent';
+            return roleFilter!.contains(role);
+          }).toList();
+        }
+
+        // Search filter
+        if (filter.isNotEmpty) {
+          docs = docs.where((d) {
+            final data = d.data() as Map<String, dynamic>;
+            final name = (data['displayName'] as String? ?? '').toLowerCase();
+            final email = (data['email'] as String? ?? '').toLowerCase();
+            return name.contains(filter) || email.contains(filter);
+          }).toList();
+        }
+
+        // Sort by name
+        docs.sort((a, b) {
+          final n1 = (a.data() as Map)['displayName'] as String? ?? '';
+          final n2 = (b.data() as Map)['displayName'] as String? ?? '';
+          return n1.compareTo(n2);
+        });
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Text(emptyMessage,
+                style: const TextStyle(color: AppTheme.textSecondary)),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: docs.length,
+          itemBuilder: (_, i) {
+            final data = docs[i].data() as Map<String, dynamic>;
+            final uid = docs[i].id;
+            final name = data['displayName'] as String? ?? 'Unknown';
+            final email = data['email'] as String? ?? '';
+            final role = data['role'] as String? ?? 'parent';
+            final isHighlighted = uid == highlightUid;
+            final isStudent = role == 'student';
+            final isMentor = data['isMentor'] as bool? ?? false;
+            final roleColor = role == 'admin'
+                ? const Color(0xFF7B1FA2)
+                : isStudent
+                    ? AppTheme.gold
+                    : isMentor
+                        ? AppTheme.classesColor
+                        : AppTheme.navy;
+            final roleLabel = role == 'admin'
+                ? 'ADMIN'
+                : isStudent
+                    ? 'STUDENT'
+                    : isMentor
+                        ? 'MENTOR'
+                        : 'PARENT';
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: isHighlighted
+                    ? AppTheme.navy.withValues(alpha: 0.06)
+                    : AppTheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isHighlighted
+                      ? AppTheme.navy.withValues(alpha: 0.3)
+                      : AppTheme.cardBorder,
+                ),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: roleColor.withValues(alpha: 0.15),
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: TextStyle(
+                        color: roleColor, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                title: Text(name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14)),
+                subtitle: Text(email,
+                    style: const TextStyle(fontSize: 12)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: roleColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(roleLabel,
+                          style: TextStyle(
+                              color: roleColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right,
+                        size: 18, color: AppTheme.textHint),
+                  ],
+                ),
+                onTap: () => onTap(uid, name),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
-class _MemberGroupsScreenState extends State<_MemberGroupsScreen> {
-  final _db = FirebaseFirestore.instance;
+// ── Student → Classes enrollment screen ──────────────────────────────────────
+class _StudentClassesScreen extends StatefulWidget {
+  final String uid;
+  final String name;
+  final FirebaseFirestore db;
+  const _StudentClassesScreen(
+      {required this.uid, required this.name, required this.db});
 
+  @override
+  State<_StudentClassesScreen> createState() => _StudentClassesScreenState();
+}
+
+class _StudentClassesScreenState extends State<_StudentClassesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -293,71 +407,60 @@ class _MemberGroupsScreenState extends State<_MemberGroupsScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Create & Assign New Group',
-            onPressed: () => _createAndAssign(context),
+            icon: const Icon(Icons.info_outline, size: 18),
+            tooltip: 'Classes are for coursework. Toggle to enroll/unenroll.',
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text(
+                      'Toggle classes to enroll or unenroll this student.')),
+            ),
           ),
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _db.collection('groups').snapshots(),
+        stream: widget.db
+            .collection('classes')
+            .where('isArchived', isEqualTo: false)
+            .snapshots(),
         builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
+          if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final docs = snap.data?.docs ?? [];
+          final docs = snap.data!.docs;
           if (docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.group_outlined,
-                      size: 48, color: AppTheme.textHint),
-                  const SizedBox(height: 12),
-                  const Text('No groups exist yet',
-                      style: TextStyle(color: AppTheme.textSecondary)),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () => _createAndAssign(context),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Group'),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.navy),
-                  ),
-                ],
-              ),
-            );
+            return const Center(
+                child: Text('No classes found. Create classes first.',
+                    style:
+                        TextStyle(color: AppTheme.textSecondary)));
           }
+          // Sort by name
+          final sorted = [...docs];
+          sorted.sort((a, b) {
+            final n1 = (a.data() as Map)['name'] as String? ?? '';
+            final n2 = (b.data() as Map)['name'] as String? ?? '';
+            return n1.compareTo(n2);
+          });
           return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: docs.length,
+            padding: const EdgeInsets.all(14),
+            itemCount: sorted.length,
             itemBuilder: (_, i) {
-              final gData = docs[i].data() as Map<String, dynamic>;
-              final gId = docs[i].id;
-              final gName = gData['name'] as String? ?? 'Group';
-              final gType = gData['type'] as String? ?? 'other';
-              final members =
-                  List<String>.from(gData['memberUids'] as List? ?? []);
-              final mentors =
-                  List<String>.from(gData['mentorUids'] as List? ?? []);
-              final seconds =
-                  List<String>.from(gData['secondUids'] as List? ?? []);
+              final data = sorted[i].data() as Map<String, dynamic>;
+              final classId = sorted[i].id;
+              final className = data['name'] as String? ?? '';
+              final enrolled =
+                  List<String>.from(data['enrolledUids'] as List? ?? []);
+              final isEnrolled = enrolled.contains(widget.uid);
+              final colorVal =
+                  data['colorValue'] as int? ?? 0xFF283593;
 
-              final isMember = members.contains(widget.uid);
-              final isMentor = mentors.contains(widget.uid);
-              final isSecond = seconds.contains(widget.uid);
-
-              return _GroupAssignmentTile(
-                groupId: gId,
-                groupName: gName,
-                groupType: gType,
-                isMember: isMember,
-                isMentor: isMentor,
-                isSecond: isSecond,
-                isStudent: widget.isStudent,
-                uid: widget.uid,
-                userName: widget.name,
-                db: _db,
+              return _ClassEnrollTile(
+                classId: classId,
+                className: className,
+                colorValue: colorVal,
+                isEnrolled: isEnrolled,
+                db: widget.db,
+                studentUid: widget.uid,
+                studentName: widget.name,
               );
             },
           );
@@ -365,173 +468,46 @@ class _MemberGroupsScreenState extends State<_MemberGroupsScreen> {
       ),
     );
   }
-
-  void _createAndAssign(BuildContext context) {
-    final nameCtrl = TextEditingController();
-    String groupType = widget.isStudent ? 'class' : 'committee';
-    bool saving = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx2, setS) => AlertDialog(
-          title: Text('Create & Add ${widget.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Group / Class Name',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: groupType,
-                decoration: const InputDecoration(
-                    labelText: 'Type', border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'class', child: Text('Class')),
-                  DropdownMenuItem(
-                      value: 'committee', child: Text('Committee')),
-                  DropdownMenuItem(
-                      value: 'mentor_group', child: Text('Mentor Group')),
-                  DropdownMenuItem(value: 'other', child: Text('Other')),
-                ],
-                onChanged: (v) => setS(() => groupType = v!),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      if (nameCtrl.text.trim().isEmpty) return;
-                      setS(() => saving = true);
-                      await _db.collection('groups').add({
-                        'name': nameCtrl.text.trim(),
-                        'type': groupType,
-                        'memberUids': [widget.uid],
-                        'memberNames': [widget.name],
-                        'mentorUids': [],
-                        'secondUids': [],
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
-                      if (ctx.mounted) {
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                '${widget.name} added to ${nameCtrl.text.trim()}!'),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
-                      }
-                    },
-              child: saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child:
-                          CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Create & Add'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
-// ── Group Assignment Tile ──────────────────────────────────────────
-class _GroupAssignmentTile extends StatefulWidget {
-  final String groupId;
-  final String groupName;
-  final String groupType;
-  final bool isMember;
-  final bool isMentor;
-  final bool isSecond;
-  final bool isStudent;
-  final String uid;
-  final String userName;
+class _ClassEnrollTile extends StatefulWidget {
+  final String classId;
+  final String className;
+  final int colorValue;
+  final bool isEnrolled;
   final FirebaseFirestore db;
+  final String studentUid;
+  final String studentName;
 
-  const _GroupAssignmentTile({
-    required this.groupId,
-    required this.groupName,
-    required this.groupType,
-    required this.isMember,
-    required this.isMentor,
-    required this.isSecond,
-    required this.isStudent,
-    required this.uid,
-    required this.userName,
+  const _ClassEnrollTile({
+    required this.classId,
+    required this.className,
+    required this.colorValue,
+    required this.isEnrolled,
     required this.db,
+    required this.studentUid,
+    required this.studentName,
   });
 
   @override
-  State<_GroupAssignmentTile> createState() => _GroupAssignmentTileState();
+  State<_ClassEnrollTile> createState() => _ClassEnrollTileState();
 }
 
-class _GroupAssignmentTileState extends State<_GroupAssignmentTile> {
+class _ClassEnrollTileState extends State<_ClassEnrollTile> {
   bool _saving = false;
 
-  Color get _typeColor {
-    switch (widget.groupType) {
-      case 'class':
-        return AppTheme.assignmentsColor;
-      case 'committee':
-        return AppTheme.navy;
-      case 'mentor_group':
-        return AppTheme.prayerColor;
-      default:
-        return AppTheme.textSecondary;
-    }
-  }
-
-  Future<void> _toggleMember(bool add) async {
+  Future<void> _toggle(bool enroll) async {
     setState(() => _saving = true);
     try {
-      final ref = widget.db.collection('groups').doc(widget.groupId);
-      if (add) {
-        await ref.update({
-          'memberUids': FieldValue.arrayUnion([widget.uid]),
-          'memberNames': FieldValue.arrayUnion([widget.userName]),
-        });
-      } else {
-        await ref.update({
-          'memberUids': FieldValue.arrayRemove([widget.uid]),
-          'memberNames': FieldValue.arrayRemove([widget.userName]),
-          'mentorUids': FieldValue.arrayRemove([widget.uid]),
-          'secondUids': FieldValue.arrayRemove([widget.uid]),
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _toggleRole(String role, bool add) async {
-    setState(() => _saving = true);
-    try {
-      final ref = widget.db.collection('groups').doc(widget.groupId);
-      final field = role == 'mentor' ? 'mentorUids' : 'secondUids';
-      // Also ensure member
-      if (add) {
-        await ref.update({
-          field: FieldValue.arrayUnion([widget.uid]),
-          'memberUids': FieldValue.arrayUnion([widget.uid]),
-          'memberNames': FieldValue.arrayUnion([widget.userName]),
-        });
-      } else {
-        await ref.update({
-          field: FieldValue.arrayRemove([widget.uid]),
-        });
+      await widget.db.collection('classes').doc(widget.classId).update({
+        'enrolledUids': enroll
+            ? FieldValue.arrayUnion([widget.studentUid])
+            : FieldValue.arrayRemove([widget.studentUid]),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'), backgroundColor: AppTheme.error));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -540,124 +516,296 @@ class _GroupAssignmentTileState extends State<_GroupAssignmentTile> {
 
   @override
   Widget build(BuildContext context) {
+    final color = Color(widget.colorValue);
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: widget.isMember
-              ? _typeColor.withValues(alpha: 0.4)
+          color: widget.isEnrolled
+              ? color.withValues(alpha: 0.5)
               : AppTheme.cardBorder,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _typeColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  widget.groupType.toUpperCase().replaceAll('_', ' '),
-                  style: TextStyle(
-                      color: _typeColor,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  widget.groupName,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 14),
-                ),
-              ),
-              if (_saving)
-                const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-              else
-                Checkbox(
-                  value: widget.isMember,
-                  activeColor: _typeColor,
-                  onChanged: (v) => _toggleMember(v!),
-                ),
-            ],
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+                color: color, borderRadius: BorderRadius.circular(6)),
           ),
-          // Role chips (only for non-students / parents)
-          if (!widget.isStudent && widget.isMember) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _RoleChip(
-                  label: 'Mentor',
-                  active: widget.isMentor,
-                  color: AppTheme.success,
-                  onTap: () => _toggleRole('mentor', !widget.isMentor),
-                ),
-                const SizedBox(width: 8),
-                _RoleChip(
-                  label: 'Second',
-                  active: widget.isSecond,
-                  color: AppTheme.warning,
-                  onTap: () => _toggleRole('second', !widget.isSecond),
-                ),
-              ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(widget.className,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w500)),
+          ),
+          if (_saving)
+            const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+          else
+            Switch.adaptive(
+              value: widget.isEnrolled,
+              activeColor: color,
+              onChanged: _toggle,
             ),
-          ],
         ],
       ),
     );
   }
 }
 
-class _RoleChip extends StatelessWidget {
-  final String label;
-  final bool active;
-  final Color color;
-  final VoidCallback onTap;
-  const _RoleChip({
-    required this.label,
-    required this.active,
-    required this.color,
-    required this.onTap,
+// ── Parent → Group Chats (committees) enrollment screen ──────────────────────
+class _ParentGroupsScreen extends StatefulWidget {
+  final String uid;
+  final String name;
+  final FirebaseFirestore db;
+  const _ParentGroupsScreen(
+      {required this.uid, required this.name, required this.db});
+
+  @override
+  State<_ParentGroupsScreen> createState() => _ParentGroupsScreenState();
+}
+
+class _ParentGroupsScreenState extends State<_ParentGroupsScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: Text(widget.name),
+        backgroundColor: AppTheme.navy,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text(
+              'Group Chats (Committees)',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.navy),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Toggle to add/remove from group chats. '
+              'Classes are separate from group chats.',
+              style:
+                  TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: widget.db
+                  .collection('chatRooms')
+                  .where('roomType', isEqualTo: 'committee')
+                  .snapshots(),
+              builder: (ctx, snap) {
+                if (!snap.hasData) {
+                  return const Center(
+                      child: CircularProgressIndicator());
+                }
+                final docs = snap.data!.docs;
+                if (docs.isEmpty) {
+                  return const Center(
+                    child: Text('No group chats found.\nCreate one from the + button.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: AppTheme.textSecondary)),
+                  );
+                }
+                // Sort by name
+                final sorted = [...docs];
+                sorted.sort((a, b) {
+                  final n1 = (a.data() as Map)['name'] as String? ?? '';
+                  final n2 = (b.data() as Map)['name'] as String? ?? '';
+                  return n1.compareTo(n2);
+                });
+                return ListView.builder(
+                  padding: const EdgeInsets.all(14),
+                  itemCount: sorted.length,
+                  itemBuilder: (_, i) {
+                    final data =
+                        sorted[i].data() as Map<String, dynamic>;
+                    final roomId = sorted[i].id;
+                    final roomName = data['name'] as String? ?? '';
+                    final subType =
+                        data['groupSubType'] as String? ?? 'committee';
+                    final members = List<String>.from(
+                        data['members'] as List? ?? []);
+                    final isMember = members.contains(widget.uid);
+
+                    return _GroupChatEnrollTile(
+                      roomId: roomId,
+                      roomName: roomName,
+                      subType: subType,
+                      isMember: isMember,
+                      db: widget.db,
+                      uid: widget.uid,
+                      userName: widget.name,
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupChatEnrollTile extends StatefulWidget {
+  final String roomId;
+  final String roomName;
+  final String subType;
+  final bool isMember;
+  final FirebaseFirestore db;
+  final String uid;
+  final String userName;
+
+  const _GroupChatEnrollTile({
+    required this.roomId,
+    required this.roomName,
+    required this.subType,
+    required this.isMember,
+    required this.db,
+    required this.uid,
+    required this.userName,
   });
 
   @override
+  State<_GroupChatEnrollTile> createState() => _GroupChatEnrollTileState();
+}
+
+class _GroupChatEnrollTileState extends State<_GroupChatEnrollTile> {
+  bool _saving = false;
+
+  Future<void> _toggle(bool add) async {
+    setState(() => _saving = true);
+    try {
+      await widget.db.collection('chatRooms').doc(widget.roomId).update({
+        'members': add
+            ? FieldValue.arrayUnion([widget.uid])
+            : FieldValue.arrayRemove([widget.uid]),
+        'memberNames': add
+            ? FieldValue.arrayUnion([widget.userName])
+            : FieldValue.arrayRemove([widget.userName]),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'), backgroundColor: AppTheme.error));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Color get _typeColor {
+    switch (widget.subType) {
+      case 'class':
+        return AppTheme.classesColor;
+      case 'other':
+        return AppTheme.calendarColor;
+      default:
+        return AppTheme.navy;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          color: active
-              ? color.withValues(alpha: 0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: active
-                  ? color
-                  : AppTheme.cardBorder),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: active ? color : AppTheme.textSecondary,
-          ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: widget.isMember
+              ? _typeColor.withValues(alpha: 0.5)
+              : AppTheme.cardBorder,
         ),
       ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: _typeColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              widget.subType.toUpperCase(),
+              style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: _typeColor),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(widget.roomName,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w500)),
+          ),
+          if (_saving)
+            const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+          else
+            Switch.adaptive(
+              value: widget.isMember,
+              activeColor: _typeColor,
+              onChanged: _toggle,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Universal screen (All tab) — routes to student or parent screen ───────────
+class _UniversalMemberScreen extends StatelessWidget {
+  final String uid;
+  final String name;
+  final FirebaseFirestore db;
+  const _UniversalMemberScreen(
+      {required this.uid, required this.name, required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: db.collection('users').doc(uid).get(),
+      builder: (ctx, snap) {
+        if (!snap.hasData) {
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
+        }
+        final data = snap.data!.data() as Map<String, dynamic>? ?? {};
+        final role = data['role'] as String? ?? 'parent';
+        final isStudent = role == 'student';
+
+        if (isStudent) {
+          return _StudentClassesScreen(uid: uid, name: name, db: db);
+        } else {
+          return _ParentGroupsScreen(uid: uid, name: name, db: db);
+        }
+      },
     );
   }
 }

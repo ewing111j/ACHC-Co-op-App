@@ -343,21 +343,44 @@ class _ProgressBar extends StatelessWidget {
 
   Future<double> _calcProgress() async {
     try {
-      final hwSnap = await db
+      // Query across all weeks in the class (nested structure)
+      final weeksSnap = await db
           .collection('classes')
           .doc(classId)
-          .collection('homework')
-          .where('isHidden', isEqualTo: false)
+          .collection('weeks')
+          .where('isBreak', isEqualTo: false)
           .get();
-      if (hwSnap.docs.isEmpty) return 1.0;
-      final total = hwSnap.docs.length;
-      final subSnap = await db
-          .collection('submissions')
-          .where('classId', isEqualTo: classId)
-          .where('studentUid', isEqualTo: studentUid)
-          .where('status', whereIn: ['complete', 'submitted', 'graded']).get();
-      final done = subSnap.docs.length;
-      return done / total;
+      int totalHw = 0;
+      int doneHw = 0;
+      for (final weekDoc in weeksSnap.docs) {
+        final hwSnap = await db
+            .collection('classes')
+            .doc(classId)
+            .collection('weeks')
+            .doc(weekDoc.id)
+            .collection('homework')
+            .where('isHidden', isEqualTo: false)
+            .get();
+        totalHw += hwSnap.docs.length;
+        for (final hwDoc in hwSnap.docs) {
+          final subSnap = await db
+              .collection('classes')
+              .doc(classId)
+              .collection('weeks')
+              .doc(weekDoc.id)
+              .collection('homework')
+              .doc(hwDoc.id)
+              .collection('submissions')
+              .where('studentUid', isEqualTo: studentUid)
+              .where('status',
+                  whereIn: ['complete', 'submitted', 'graded'])
+              .limit(1)
+              .get();
+          if (subSnap.docs.isNotEmpty) doneHw++;
+        }
+      }
+      if (totalHw == 0) return 1.0;
+      return doneHw / totalHw;
     } catch (_) {
       return 0.0;
     }

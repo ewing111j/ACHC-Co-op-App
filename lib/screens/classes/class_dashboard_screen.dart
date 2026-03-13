@@ -309,19 +309,43 @@ class _MiniProgress extends StatelessWidget {
 
   Future<double> _calc() async {
     try {
-      final hw = await db
+      // Aggregate across all weeks in this class
+      final weeksSnap = await db
           .collection('classes')
           .doc(classId)
-          .collection('homework')
-          .where('isHidden', isEqualTo: false)
+          .collection('weeks')
+          .where('isBreak', isEqualTo: false)
           .get();
-      if (hw.docs.isEmpty) return 1.0;
-      final sub = await db
-          .collection('submissions')
-          .where('classId', isEqualTo: classId)
-          .where('studentUid', isEqualTo: studentUid)
-          .where('status', whereIn: ['complete', 'submitted', 'graded']).get();
-      return sub.docs.length / hw.docs.length;
+      int totalHw = 0;
+      int doneHw = 0;
+      for (final weekDoc in weeksSnap.docs) {
+        final hwSnap = await db
+            .collection('classes')
+            .doc(classId)
+            .collection('weeks')
+            .doc(weekDoc.id)
+            .collection('homework')
+            .where('isHidden', isEqualTo: false)
+            .get();
+        totalHw += hwSnap.docs.length;
+        for (final hwDoc in hwSnap.docs) {
+          final subSnap = await db
+              .collection('classes')
+              .doc(classId)
+              .collection('weeks')
+              .doc(weekDoc.id)
+              .collection('homework')
+              .doc(hwDoc.id)
+              .collection('submissions')
+              .where('studentUid', isEqualTo: studentUid)
+              .where('status', whereIn: ['complete', 'submitted', 'graded'])
+              .limit(1)
+              .get();
+          if (subSnap.docs.isNotEmpty) doneHw++;
+        }
+      }
+      if (totalHw == 0) return 1.0;
+      return doneHw / totalHw;
     } catch (_) {
       return 0.0;
     }
@@ -580,8 +604,9 @@ class _WeekContent extends StatelessWidget {
       stream: db
           .collection('classes')
           .doc(classModel.id)
+          .collection('weeks')
+          .doc(week.id)
           .collection('homework')
-          .where('weekId', isEqualTo: week.id)
           .orderBy('sortOrder')
           .snapshots(),
       builder: (ctx, snap) {
@@ -717,18 +742,22 @@ class _OverdueBanner extends StatelessWidget {
       final hw = await db
           .collection('classes')
           .doc(classId)
+          .collection('weeks')
+          .doc(weekId)
           .collection('homework')
-          .where('weekId', isEqualTo: weekId)
           .get();
       if (hw.docs.isEmpty) return 0;
-      final hwIds = hw.docs.map((d) => d.id).toList();
       int overdue = 0;
-      for (final id in hwIds) {
+      for (final doc in hw.docs) {
         final sub = await db
+            .collection('classes')
+            .doc(classId)
+            .collection('weeks')
+            .doc(weekId)
+            .collection('homework')
+            .doc(doc.id)
             .collection('submissions')
-            .where('homeworkId', isEqualTo: id)
             .where('studentUid', isEqualTo: studentUid)
-            .where('status', whereIn: ['complete', 'submitted', 'graded'])
             .limit(1)
             .get();
         if (sub.docs.isEmpty) overdue++;
@@ -779,8 +808,13 @@ class _HomeworkCardState extends State<_HomeworkCard> {
     }
     try {
       final snap = await widget.db
+          .collection('classes')
+          .doc(widget.homework.classId)
+          .collection('weeks')
+          .doc(widget.homework.weekId)
+          .collection('homework')
+          .doc(widget.homework.id)
           .collection('submissions')
-          .where('homeworkId', isEqualTo: widget.homework.id)
           .where('studentUid', isEqualTo: widget.user.uid)
           .limit(1)
           .get();
