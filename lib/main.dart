@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'providers/auth_provider.dart';
 import 'providers/assignments_provider.dart';
+import 'providers/classes_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'utils/app_theme.dart';
@@ -47,6 +48,7 @@ class AchcHubApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => AssignmentsProvider()),
+        ChangeNotifierProvider(create: (_) => ClassesProvider()),
       ],
       child: MaterialApp(
         title: 'ACHC Hub',

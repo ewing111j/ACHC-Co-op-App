@@ -22,7 +22,9 @@ class AppTheme {
   // ── Text ─────────────────────────────────────────────────────
   static const Color textPrimary    = Color(0xFF1E2B5E);   // navy as text
   static const Color textSecondary  = Color(0xFF5A6584);
+  static const Color textTertiary   = Color(0xFFB0B8D0);   // alias for textHint
   static const Color textHint       = Color(0xFFB0B8D0);
+  static const Color dividerColor   = Color(0xFFE4E8F0);
 
   // ── Status ───────────────────────────────────────────────────
   static const Color success  = Color(0xFF2E7D32);
@@ -35,14 +37,17 @@ class AppTheme {
   static const Color optionalGreen = Color(0xFF2E7D32);
 
   // ── Feature Tile Colors (navy-tinted variants) ────────────────
-  static const Color assignmentsColor = Color(0xFF283593);  // deep indigo-navy
-  static const Color messagesColor    = Color(0xFF1E2B5E);  // navy
-  static const Color calendarColor    = Color(0xFF2E6B3E);  // forest green
-  static const Color photosColor      = Color(0xFF7B1E3E);  // deep rose
-  static const Color checkInColor     = Color(0xFFC9A84C);  // gold
-  static const Color filesColor       = Color(0xFF5D3A1A);  // dark brown
-  static const Color feedsColor       = Color(0xFF1A4A7A);  // dark blue
-  static const Color prayerColor      = Color(0xFF4A1942);  // deep purple
+  static const Color assignmentsColor  = Color(0xFF283593);  // deep indigo-navy
+  static const Color messagesColor     = Color(0xFF1E2B5E);  // navy
+  static const Color calendarColor     = Color(0xFF2E6B3E);  // forest green
+  static const Color photosColor       = Color(0xFF7B1E3E);  // deep rose
+  static const Color checkInColor      = Color(0xFFC9A84C);  // gold
+  static const Color filesColor        = Color(0xFF5D3A1A);  // dark brown
+  static const Color feedsColor        = Color(0xFF1A4A7A);  // dark blue
+  static const Color prayerColor       = Color(0xFF4A1942);  // deep purple
+  static const Color classesColor      = Color(0xFF1E6B6B);  // teal
+  static const Color trainingColor     = Color(0xFF8B2500);  // burnt orange
+  static const Color memoryWorkColor   = Color(0xFF2D3E7E);  // mid navy
 
   // ── Gradients ────────────────────────────────────────────────
   static const LinearGradient navyGradient = LinearGradient(

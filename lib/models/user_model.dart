@@ -1,15 +1,17 @@
 // lib/models/user_model.dart
 
-enum UserRole { parent, student, admin }
+enum UserRole { parent, student, admin, mentor }
 
 class UserModel {
   final String uid;
   final String email;
   final String displayName;
   final UserRole role;
-  final String? parentUid; // For student accounts
+  final bool isMentor; // can be true alongside parent role
+  final List<String> mentorClassIds; // classes this user mentors
+  final String? parentUid;
   final String? familyId;
-  final List<String> kidUids; // Student UIDs for parent accounts
+  final List<String> kidUids;
   final String? avatarUrl;
   final String? moodleToken;
   final String? moodleUrl;
@@ -22,6 +24,8 @@ class UserModel {
     required this.email,
     required this.displayName,
     required this.role,
+    this.isMentor = false,
+    this.mentorClassIds = const [],
     this.parentUid,
     this.familyId,
     this.kidUids = const [],
@@ -35,9 +39,12 @@ class UserModel {
 
   bool get isParent => role == UserRole.parent;
   bool get isStudent => role == UserRole.student;
-  // Legacy alias for backward compat
-  bool get isKid => role == UserRole.student;
+  bool get isKid => role == UserRole.student; // legacy alias
   bool get isAdmin => role == UserRole.admin;
+  // A user is a mentor if role==mentor OR isMentor flag is true (parent-mentor)
+  bool get canMentor => role == UserRole.mentor || isMentor;
+  // Can edit classes: mentor or admin
+  bool get canEditClasses => canMentor || isAdmin;
 
   factory UserModel.fromMap(Map<String, dynamic> map, String uid) {
     return UserModel(
@@ -45,6 +52,8 @@ class UserModel {
       email: map['email'] as String? ?? '',
       displayName: map['displayName'] as String? ?? '',
       role: _roleFromString(map['role'] as String? ?? 'parent'),
+      isMentor: map['isMentor'] as bool? ?? false,
+      mentorClassIds: List<String>.from(map['mentorClassIds'] as List? ?? []),
       parentUid: map['parentUid'] as String?,
       familyId: map['familyId'] as String?,
       kidUids: List<String>.from(map['kidUids'] as List? ?? []),
@@ -65,6 +74,8 @@ class UserModel {
       'email': email,
       'displayName': displayName,
       'role': role == UserRole.student ? 'student' : role.name,
+      'isMentor': isMentor,
+      'mentorClassIds': mentorClassIds,
       'parentUid': parentUid,
       'familyId': familyId,
       'kidUids': kidUids,
@@ -82,6 +93,8 @@ class UserModel {
     String? moodleToken,
     String? moodleUrl,
     List<String>? kidUids,
+    List<String>? mentorClassIds,
+    bool? isMentor,
     String? fcmToken,
     bool? isActive,
   }) {
@@ -90,6 +103,8 @@ class UserModel {
       email: email,
       displayName: displayName ?? this.displayName,
       role: role,
+      isMentor: isMentor ?? this.isMentor,
+      mentorClassIds: mentorClassIds ?? this.mentorClassIds,
       parentUid: parentUid,
       familyId: familyId,
       kidUids: kidUids ?? this.kidUids,
@@ -109,6 +124,8 @@ class UserModel {
         return UserRole.student;
       case 'admin':
         return UserRole.admin;
+      case 'mentor':
+        return UserRole.mentor;
       default:
         return UserRole.parent;
     }

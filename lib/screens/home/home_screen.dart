@@ -11,12 +11,12 @@ import '../../services/notification_prefs_service.dart';
 import '../assignments/assignments_screen.dart';
 import '../messages/messages_screen.dart';
 import '../calendar/calendar_screen.dart';
-import '../photos/photos_screen.dart';
 import '../checkin/checkin_screen.dart';
 import '../files/files_screen.dart';
 import '../feeds/feeds_screen.dart';
 import '../settings/settings_screen.dart';
 import '../admin/admin_screen.dart';
+import '../classes/classes_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -486,10 +486,19 @@ class _HomeScreenState extends State<HomeScreen> {
           badgeQuery: (db, uid) => db.collection('assignments')
               .where('assignedUids', arrayContains: uid)
               .where('status', isEqualTo: 'pending')),
+        _FeatureItem('Classes', Icons.menu_book_outlined,
+          AppTheme.classesColor, const ClassesScreen(),
+          seenKey: 'classes'),
         _FeatureItem('Prayer', Icons.volunteer_activism_outlined,
           AppTheme.prayerColor, const FeedsScreen(initialTab: 2),
           notifKey: NotificationPrefsService.keyFeedPrayer,
           seenKey: 'feeds'),
+        _FeatureItem('Training', Icons.school_outlined,
+          const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
+          seenKey: 'training'),
+        _FeatureItem('Memory Work', Icons.auto_stories_outlined,
+          const Color(0xFF1565C0), const _PlaceholderScreen(title: 'Memory Work'),
+          seenKey: 'memorywork'),
       ];
     }
     return [
@@ -500,6 +509,9 @@ class _HomeScreenState extends State<HomeScreen> {
         badgeQuery: (db, uid) => db.collection('assignments')
             .where('assignedUids', arrayContains: uid)
             .where('status', isEqualTo: 'pending')),
+      _FeatureItem('Classes', Icons.menu_book_outlined,
+        AppTheme.classesColor, const ClassesScreen(),
+        seenKey: 'classes'),
       _FeatureItem('Messages', Icons.chat_bubble_outline,
         AppTheme.messagesColor, const MessagesScreen(),
         notifKey: NotificationPrefsService.keyMessages,
@@ -510,10 +522,6 @@ class _HomeScreenState extends State<HomeScreen> {
         AppTheme.calendarColor, const CalendarScreen(),
         notifKey: NotificationPrefsService.keyCalendar,
         seenKey: 'calendar'),
-      _FeatureItem('Photos', Icons.photo_library_outlined,
-        AppTheme.photosColor, const PhotosScreen(),
-        notifKey: NotificationPrefsService.keyPhotos,
-        seenKey: 'photos'),
       _FeatureItem('Check-In', Icons.how_to_reg_outlined,
         AppTheme.checkInColor, const CheckInScreen(),
         seenKey: 'checkin'),
@@ -525,6 +533,12 @@ class _HomeScreenState extends State<HomeScreen> {
         AppTheme.feedsColor, const FeedsScreen(),
         notifKey: NotificationPrefsService.keyFeedAnnouncements,
         seenKey: 'feeds'),
+      _FeatureItem('Training', Icons.school_outlined,
+        const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
+        seenKey: 'training'),
+      _FeatureItem('Memory Work', Icons.auto_stories_outlined,
+        const Color(0xFF1565C0), const _PlaceholderScreen(title: 'Memory Work'),
+        seenKey: 'memorywork'),
     ];
   }
 
@@ -872,8 +886,6 @@ class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
           AppTheme.photosColor, NotificationPrefsService.keyFeedSocial),
       _NotifItem('Prayer Feed', Icons.volunteer_activism_outlined,
           AppTheme.prayerColor, NotificationPrefsService.keyFeedPrayer),
-      _NotifItem('Photos', Icons.photo_library_outlined,
-          AppTheme.photosColor, NotificationPrefsService.keyPhotos),
     ];
 
     return DraggableScrollableSheet(
@@ -970,4 +982,65 @@ class _NotifItem {
   final bool locked;
   const _NotifItem(this.label, this.icon, this.color, this.key,
       {this.locked = false});
+}
+
+// ── Placeholder Screen for upcoming features ──────────────────────────────────
+class _PlaceholderScreen extends StatelessWidget {
+  final String title;
+  const _PlaceholderScreen({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: Text(title),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppTheme.navy.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(64),
+              ),
+              child: const Icon(Icons.construction_outlined,
+                  size: 64, color: AppTheme.navy),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              title,
+              style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.navy),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Coming Soon!',
+              style: TextStyle(
+                  fontSize: 15,
+                  color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                'This feature is under development and will be available in a future update.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13, color: AppTheme.textTertiary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

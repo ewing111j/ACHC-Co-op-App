@@ -1,0 +1,441 @@
+// lib/screens/classes/classes_screen.dart
+// Classes List — top-level home screen entry point
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import '../../providers/auth_provider.dart';
+import '../../models/user_model.dart';
+import '../../models/class_models.dart';
+import '../../utils/app_theme.dart';
+import 'class_dashboard_screen.dart';
+import 'add_class_sheet.dart';
+import 'google_sheet_import_screen.dart';
+
+class ClassesScreen extends StatefulWidget {
+  const ClassesScreen({super.key});
+  @override
+  State<ClassesScreen> createState() => _ClassesScreenState();
+}
+
+class _ClassesScreenState extends State<ClassesScreen> {
+  final _db = FirebaseFirestore.instance;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() => setState(() => _query = _searchCtrl.text.toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().currentUser!;
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Classes'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          if (user.isAdmin)
+            IconButton(
+              icon: const Icon(Icons.table_chart_outlined, size: 20),
+              tooltip: 'Import from Google Sheet',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => GoogleSheetImportScreen(user: user))),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Search bar
+          Container(
+            color: AppTheme.surface,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: TextField(
+              controller: _searchCtrl,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Search classes…',
+                prefixIcon: const Icon(Icons.search, size: 18),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 16),
+                        onPressed: () => _searchCtrl.clear())
+                    : null,
+                isDense: true,
+                filled: true,
+                fillColor: AppTheme.surfaceVariant,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide.none),
+              ),
+            ),
+          ),
+          AppTheme.goldDivider(),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _buildQuery(user),
+              builder: (ctx, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(child: Text('Error: ${snap.error}',
+                      style: const TextStyle(color: AppTheme.error)));
+                }
+                var classes = (snap.data?.docs ?? [])
+                    .map((d) => ClassModel.fromMap(d.data() as Map<String, dynamic>, d.id))
+                    .where((c) => !c.isArchived)
+                    .toList();
+                if (_query.isNotEmpty) {
+                  classes = classes
+                      .where((c) =>
+                          c.name.toLowerCase().contains(_query) ||
+                          c.shortname.toLowerCase().contains(_query))
+                      .toList();
+                }
+                classes.sort((a, b) => a.name.compareTo(b.name));
+                if (classes.isEmpty) {
+                  return _EmptyClasses(canAdd: user.canEditClasses || user.isAdmin);
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: classes.length,
+                  itemBuilder: (ctx, i) => _ClassCard(
+                    cls: classes[i],
+                    user: user,
+                    db: _db,
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(
+                            builder: (_) => ClassDashboardScreen(
+                                classModel: classes[i], user: user))),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: (user.canEditClasses || user.isAdmin)
+          ? FloatingActionButton.extended(
+              onPressed: () => showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => AddClassSheet(user: user, db: _db),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Class'),
+              backgroundColor: AppTheme.classesColor,
+            )
+          : null,
+    );
+  }
+
+  Stream<QuerySnapshot> _buildQuery(UserModel user) {
+    final col = _db.collection('classes');
+    if (user.isAdmin) return col.snapshots();
+    if (user.canMentor) {
+      return col.where('mentorUids', arrayContains: user.uid).snapshots();
+    }
+    // Student or parent: see enrolled classes
+    final uid = user.isStudent ? user.uid : null;
+    if (uid != null) {
+      return col.where('enrolledUids', arrayContains: uid).snapshots();
+    }
+    // Parent: show all (filter by kids happens in dashboard)
+    return col.snapshots();
+  }
+}
+
+// ── Class Card ────────────────────────────────────────────────────────────────
+class _ClassCard extends StatelessWidget {
+  final ClassModel cls;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final VoidCallback onTap;
+
+  const _ClassCard({
+    required this.cls,
+    required this.user,
+    required this.db,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Color(cls.colorValue);
+    // Progress: fetch submission stats
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // Header stripe
+            Container(
+              height: 4,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      // Color dot + shortname
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: color.withValues(alpha: 0.3)),
+                        ),
+                        child: Text(cls.shortname,
+                            style: TextStyle(
+                                color: color,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(cls.name,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary)),
+                      ),
+                      const Icon(Icons.chevron_right,
+                          color: AppTheme.textHint, size: 18),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Mentor names
+                  _MentorNames(mentorUids: cls.mentorUids, db: db),
+                  const SizedBox(height: 10),
+                  // Progress bar (student/parent view)
+                  if (user.isStudent)
+                    _ProgressBar(
+                        classId: cls.id,
+                        studentUid: user.uid,
+                        db: db,
+                        color: color)
+                  else if (user.canMentor || user.isAdmin)
+                    Row(
+                      children: [
+                        const Icon(Icons.people_outline,
+                            size: 13, color: AppTheme.textHint),
+                        const SizedBox(width: 4),
+                        Text('${cls.enrolledUids.length} students',
+                            style: const TextStyle(
+                                fontSize: 12, color: AppTheme.textSecondary)),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.navy.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(cls.gradingMode == 'percent' ? '% grades' : 'Complete/Incomplete',
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  color: AppTheme.textSecondary)),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Progress bar widget (fetches real submission ratio) ───────────────────────
+class _ProgressBar extends StatelessWidget {
+  final String classId;
+  final String studentUid;
+  final FirebaseFirestore db;
+  final Color color;
+  const _ProgressBar({
+    required this.classId,
+    required this.studentUid,
+    required this.db,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<double>(
+      future: _calcProgress(),
+      builder: (ctx, snap) {
+        final pct = snap.data ?? 0.0;
+        final barColor = pct >= 0.95
+            ? AppTheme.optionalGreen
+            : pct >= 0.90
+                ? AppTheme.warning
+                : AppTheme.error;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Progress',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary)),
+                const Spacer(),
+                Text('${(pct * 100).round()}%',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: barColor)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: pct,
+                backgroundColor: AppTheme.cardBorder,
+                valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                minHeight: 6,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<double> _calcProgress() async {
+    try {
+      final hwSnap = await db
+          .collection('classes')
+          .doc(classId)
+          .collection('homework')
+          .where('isHidden', isEqualTo: false)
+          .get();
+      if (hwSnap.docs.isEmpty) return 1.0;
+      final total = hwSnap.docs.length;
+      final subSnap = await db
+          .collection('submissions')
+          .where('classId', isEqualTo: classId)
+          .where('studentUid', isEqualTo: studentUid)
+          .where('status', whereIn: ['complete', 'submitted', 'graded']).get();
+      final done = subSnap.docs.length;
+      return done / total;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+}
+
+// ── Mentor names ──────────────────────────────────────────────────────────────
+class _MentorNames extends StatelessWidget {
+  final List<String> mentorUids;
+  final FirebaseFirestore db;
+  const _MentorNames({required this.mentorUids, required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    if (mentorUids.isEmpty) {
+      return const Text('No mentor assigned',
+          style: TextStyle(fontSize: 11, color: AppTheme.textHint));
+    }
+    return FutureBuilder<List<String>>(
+      future: _fetchNames(),
+      builder: (ctx, snap) {
+        final names = snap.data ?? [];
+        return Row(
+          children: [
+            const Icon(Icons.person_outline, size: 13, color: AppTheme.textHint),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                names.isEmpty ? 'Loading…' : names.join(', '),
+                style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<List<String>> _fetchNames() async {
+    final docs = await Future.wait(
+        mentorUids.take(3).map((uid) => db.collection('users').doc(uid).get()));
+    return docs
+        .where((d) => d.exists)
+        .map((d) => d.data()?['displayName'] as String? ?? '')
+        .where((n) => n.isNotEmpty)
+        .toList();
+  }
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+class _EmptyClasses extends StatelessWidget {
+  final bool canAdd;
+  const _EmptyClasses({required this.canAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.menu_book_outlined, size: 64, color: AppTheme.textHint),
+          const SizedBox(height: 16),
+          const Text('No classes yet',
+              style: TextStyle(
+                  fontSize: 16,
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text(
+            canAdd
+                ? 'Tap + Add Class to create your first class'
+                : 'You haven\'t been enrolled in any classes yet',
+            style: const TextStyle(color: AppTheme.textHint, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}

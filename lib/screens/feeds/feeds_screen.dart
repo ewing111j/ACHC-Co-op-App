@@ -13,6 +13,7 @@ import '../../models/feed_model.dart';
 import '../../models/user_model.dart';
 import '../../services/firestore_service.dart';
 import '../../utils/app_theme.dart';
+import '../photos/photos_screen.dart';
 
 class FeedsScreen extends StatefulWidget {
   final int initialTab;
@@ -37,12 +38,13 @@ class _FeedsScreenState extends State<FeedsScreen>
   int _announceCount = 0;
   int _socialCount = 0;
   int _prayerCount = 0;
+  int _photosCount = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3,
+      length: 4,
       vsync: this,
       initialIndex: widget.initialTab,
     );
@@ -58,6 +60,7 @@ class _FeedsScreenState extends State<FeedsScreen>
         _announceTs = prefs.getInt('lastseen_feeds_announce') ?? 0;
         _socialTs   = prefs.getInt('lastseen_feeds_social')   ?? 0;
         _prayerTs   = prefs.getInt('lastseen_feeds_prayer')   ?? 0;
+        _photosCount = 0;
       });
       // Mark the initial tab as seen right away
       _markTabSeen(_tabController.index);
@@ -86,6 +89,9 @@ class _FeedsScreenState extends State<FeedsScreen>
         await prefs.setInt('lastseen_feeds_prayer', ts);
         if (mounted) setState(() { _prayerTs = ts; _prayerCount = 0; });
         break;
+      case 3:
+        if (mounted) setState(() { _photosCount = 0; });
+        break;
     }
   }
 
@@ -108,6 +114,7 @@ class _FeedsScreenState extends State<FeedsScreen>
           break;
         case FeedType.prayer:
           _prayerCount = count;
+          break;
           break;
       }
     });
@@ -156,6 +163,13 @@ class _FeedsScreenState extends State<FeedsScreen>
                 badgeCount: _prayerCount,
               ),
             ),
+            Tab(
+              child: _TabLabel(
+                icon: Icons.photo_library_outlined,
+                text: 'Photos',
+                badgeCount: _photosCount,
+              ),
+            ),
           ],
         ),
       ),
@@ -177,6 +191,8 @@ class _FeedsScreenState extends State<FeedsScreen>
             lastSeenTs: _prayerTs,
             onCountChanged: (c) => _setCount(FeedType.prayer, c),
           ),
+          // Photos moved from home screen to 4th feed
+          const PhotosScreen(embeddedMode: true),
         ],
       ),
       floatingActionButton: _canPost(user, _currentType)

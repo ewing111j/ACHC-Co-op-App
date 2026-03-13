@@ -14,7 +14,8 @@ import '../../models/user_model.dart';
 import '../../utils/app_theme.dart';
 
 class PhotosScreen extends StatefulWidget {
-  const PhotosScreen({super.key});
+  final bool embeddedMode; // true = no Scaffold/AppBar (embedded in tabs)
+  const PhotosScreen({super.key, this.embeddedMode = false});
 
   @override
   State<PhotosScreen> createState() => _PhotosScreenState();
@@ -30,9 +31,14 @@ class _PhotosScreenState extends State<PhotosScreen> {
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().currentUser!;
 
+    return embeddedWidget(user);
+  }
+
+  Widget embeddedWidget(UserModel user) {
+    final widget2 = widget;
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
+      appBar: widget2.embeddedMode ? null : AppBar(
         title: const Text('Photos'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
