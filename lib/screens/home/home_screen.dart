@@ -796,8 +796,8 @@ class _BadgeCounter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (badgeQuery == null) {
-      // Dot badge for sections without live query (calendar, files, etc.)
-      // Show if we've never seen it or it was recently updated
+      // For sections without a live query, only show dot if never visited
+      if (lastSeenTs > 0) return const SizedBox.shrink();
       return Container(
         width: 12, height: 12,
         decoration: BoxDecoration(
