@@ -1,5 +1,9 @@
 // lib/screens/checkin/checkin_screen.dart
 // Check-In tab: self + students; Attendance tab: per-class breakdown
+// Attendance permissions:
+//   - Admin: can check in students for any class
+//   - Mentor/Second: can check in only for their own assigned classes
+//   - Parent: self check-in + their own students only
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -95,7 +99,8 @@ class _CheckInTabState extends State<_CheckInTab> {
             })
         .toList();
     if (mounted) {
-      setState(() => _students = List<Map<String, dynamic>>.from(students));
+      setState(
+          () => _students = List<Map<String, dynamic>>.from(students));
     }
   }
 
@@ -225,7 +230,8 @@ class _CheckInCardState extends State<_CheckInCard> {
         }
         if (hasOut) {
           _checkOutTime = DateTime.fromMillisecondsSinceEpoch(
-              (data['checkOutTime'] as Timestamp).millisecondsSinceEpoch);
+              (data['checkOutTime'] as Timestamp)
+                  .millisecondsSinceEpoch);
         }
       });
     }
@@ -258,7 +264,10 @@ class _CheckInCardState extends State<_CheckInCard> {
     if (_checkinId == null) return;
     setState(() => _loading = true);
     try {
-      await widget.db.collection('checkins').doc(_checkinId).update({
+      await widget.db
+          .collection('checkins')
+          .doc(_checkinId)
+          .update({
         'checkOutTime': FieldValue.serverTimestamp(),
         'status': 'checkedOut',
       });
@@ -275,7 +284,10 @@ class _CheckInCardState extends State<_CheckInCard> {
     if (_checkinId == null) return;
     setState(() => _loading = true);
     try {
-      await widget.db.collection('checkins').doc(_checkinId).delete();
+      await widget.db
+          .collection('checkins')
+          .doc(_checkinId)
+          .delete();
       setState(() {
         _state = _CIState.none;
         _checkinId = null;
@@ -336,8 +348,8 @@ class _CheckInCardState extends State<_CheckInCard> {
           Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(
-                shape: BoxShape.circle, color: iconBg),
+            decoration:
+                BoxDecoration(shape: BoxShape.circle, color: iconBg),
             child: Icon(stateIcon, color: iconColor, size: 24),
           ),
           const SizedBox(width: 14),
@@ -378,8 +390,8 @@ class _CheckInCardState extends State<_CheckInCard> {
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.success,
             foregroundColor: Colors.white,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 8),
             textStyle: const TextStyle(
                 fontSize: 12, fontWeight: FontWeight.w600),
           ),
@@ -391,8 +403,8 @@ class _CheckInCardState extends State<_CheckInCard> {
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.warning,
             foregroundColor: Colors.white,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 8),
             textStyle: const TextStyle(
                 fontSize: 12, fontWeight: FontWeight.w600),
           ),
@@ -404,11 +416,11 @@ class _CheckInCardState extends State<_CheckInCard> {
           style: OutlinedButton.styleFrom(
             foregroundColor: AppTheme.textSecondary,
             side: const BorderSide(color: AppTheme.cardBorder),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 8),
             textStyle: const TextStyle(fontSize: 12),
           ),
-          child: const Text('Reset Day'),
+          child: const Text('Reset'),
         );
     }
   }
@@ -425,16 +437,38 @@ class _AttendanceTab extends StatefulWidget {
 }
 
 class _AttendanceTabState extends State<_AttendanceTab> {
-  String get _todayKey => DateFormat('yyyy-MM-dd').format(DateTime.now());
+  String get _todayKey =>
+      DateFormat('yyyy-MM-dd').format(DateTime.now());
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: widget.db.collection('groups')
+      stream: widget.db
+          .collection('groups')
           .where('type', isEqualTo: 'class')
           .snapshots(),
       builder: (ctx, groupSnap) {
-        final groups = groupSnap.data?.docs ?? [];
+        final allGroups = groupSnap.data?.docs ?? [];
+
+        // Filter groups based on role:
+        // - Admin sees all classes
+        // - Mentor/Second sees only their assigned classes
+        // - Others see all (for viewing purposes)
+        final groups = widget.user.isAdmin
+            ? allGroups
+            : allGroups.where((g) {
+                final data = g.data() as Map<String, dynamic>;
+                final mentors = List<String>.from(
+                    data['mentorUids'] as List? ?? []);
+                final seconds = List<String>.from(
+                    data['secondUids'] as List? ?? []);
+                // Mentors/seconds can interact with their classes
+                final isAssigned =
+                    mentors.contains(widget.user.uid) ||
+                        seconds.contains(widget.user.uid);
+                // Parents can see all for viewing
+                return widget.user.isParent ? true : isAssigned;
+              }).toList();
 
         return StreamBuilder<QuerySnapshot>(
           stream: widget.db
@@ -447,13 +481,14 @@ class _AttendanceTabState extends State<_AttendanceTab> {
             }
             final checkIns = ciSnap.data?.docs ?? [];
             final checkedInUids = checkIns
-                .map((d) => (d.data() as Map)['uid'] as String? ?? '')
+                .map((d) =>
+                    (d.data() as Map)['uid'] as String? ?? '')
                 .toSet();
 
             if (groups.isEmpty) {
-              // Fallback: show simple list of everyone checked in
               return _SimpleTodayList(
-                  checkIns: checkIns, totalCheckedIn: checkIns.length);
+                  checkIns: checkIns,
+                  totalCheckedIn: checkIns.length);
             }
 
             return Column(
@@ -463,13 +498,18 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                   color: AppTheme.surface,
                   child: Row(
                     children: [
-                      const Icon(Icons.people, color: AppTheme.navy, size: 20),
+                      const Icon(Icons.people,
+                          color: AppTheme.navy, size: 20),
                       const SizedBox(width: 10),
-                      Text('${checkIns.length} checked in today',
+                      Text(
+                          '${checkIns.length} checked in today',
                           style: const TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15)),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15)),
                       const Spacer(),
-                      Text(DateFormat('MMMM d').format(DateTime.now()),
+                      Text(
+                          DateFormat('MMMM d')
+                              .format(DateTime.now()),
                           style: const TextStyle(
                               fontSize: 12,
                               color: AppTheme.textHint)),
@@ -482,9 +522,10 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                     padding: const EdgeInsets.all(12),
                     itemCount: groups.length,
                     itemBuilder: (_, i) {
-                      final gData =
-                          groups[i].data() as Map<String, dynamic>;
-                      final gName = gData['name'] as String? ?? 'Class';
+                      final gData = groups[i].data()
+                          as Map<String, dynamic>;
+                      final gName =
+                          gData['name'] as String? ?? 'Class';
                       final members = List<String>.from(
                           gData['memberUids'] as List? ?? []);
                       final mentors = List<String>.from(
@@ -492,18 +533,26 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                       final seconds = List<String>.from(
                           gData['secondUids'] as List? ?? []);
 
+                      // Determine if this user can check in for this class
+                      final canCheckIn = widget.user.isAdmin ||
+                          mentors.contains(widget.user.uid) ||
+                          seconds.contains(widget.user.uid);
+
                       final classCheckedIn = members
-                          .where((uid) => checkedInUids.contains(uid))
+                          .where(
+                              (uid) => checkedInUids.contains(uid))
                           .toSet();
                       final classAbsent = members
-                          .where((uid) => !checkedInUids.contains(uid))
+                          .where((uid) =>
+                              !checkedInUids.contains(uid))
                           .toList();
-                      final mentorIn =
-                          mentors.any((m) => checkedInUids.contains(m));
-                      final secondIn =
-                          seconds.any((s) => checkedInUids.contains(s));
+                      final mentorIn = mentors
+                          .any((m) => checkedInUids.contains(m));
+                      final secondIn = seconds
+                          .any((s) => checkedInUids.contains(s));
 
                       return _ClassTodayCard(
+                        groupId: groups[i].id,
                         className: gName,
                         totalStudents: members.length,
                         checkedInCount: classCheckedIn.length,
@@ -513,6 +562,10 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                         hasMentor: mentors.isNotEmpty,
                         hasSecond: seconds.isNotEmpty,
                         db: widget.db,
+                        user: widget.user,
+                        canCheckIn: canCheckIn,
+                        todayKey: _todayKey,
+                        checkedInUids: checkedInUids,
                       );
                     },
                   ),
@@ -552,7 +605,8 @@ class _SimpleTodayList extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           leading: CircleAvatar(
             radius: 18,
-            backgroundColor: AppTheme.success.withValues(alpha: 0.1),
+            backgroundColor:
+                AppTheme.success.withValues(alpha: 0.1),
             child: const Icon(Icons.check,
                 color: AppTheme.success, size: 18),
           ),
@@ -569,6 +623,7 @@ class _SimpleTodayList extends StatelessWidget {
 
 // ── Class Today Card ───────────────────────────────────────────────
 class _ClassTodayCard extends StatefulWidget {
+  final String groupId;
   final String className;
   final int totalStudents;
   final int checkedInCount;
@@ -578,7 +633,12 @@ class _ClassTodayCard extends StatefulWidget {
   final bool hasMentor;
   final bool hasSecond;
   final FirebaseFirestore db;
+  final UserModel user;
+  final bool canCheckIn;
+  final String todayKey;
+  final Set<String> checkedInUids;
   const _ClassTodayCard({
+    required this.groupId,
     required this.className,
     required this.totalStudents,
     required this.checkedInCount,
@@ -588,6 +648,10 @@ class _ClassTodayCard extends StatefulWidget {
     required this.hasMentor,
     required this.hasSecond,
     required this.db,
+    required this.user,
+    required this.canCheckIn,
+    required this.todayKey,
+    required this.checkedInUids,
   });
 
   @override
@@ -614,7 +678,8 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: () =>
+                setState(() => _expanded = !_expanded),
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(14)),
             child: Padding(
@@ -627,8 +692,26 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                       Expanded(
                         child: Text(widget.className,
                             style: const TextStyle(
-                                fontWeight: FontWeight.w700, fontSize: 15)),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15)),
                       ),
+                      // Permission badge
+                      if (widget.canCheckIn)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.success
+                                .withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('Can check in',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: AppTheme.success,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      const SizedBox(width: 4),
                       Icon(
                           _expanded
                               ? Icons.expand_less
@@ -643,7 +726,9 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                       value: pct,
                       minHeight: 6,
                       backgroundColor: AppTheme.surfaceVariant,
-                      color: pct >= 1.0 ? AppTheme.success : AppTheme.warning,
+                      color: pct >= 1.0
+                          ? AppTheme.success
+                          : AppTheme.warning,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -672,6 +757,7 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
           ),
           if (_expanded) ...[
             const Divider(height: 1),
+            // Absent list
             widget.absentUids.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.all(12),
@@ -690,14 +776,20 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                 : Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Absent (${widget.absentUids.length}):',
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.error),
+                        Row(
+                          children: [
+                            Text(
+                              'Absent (${widget.absentUids.length}):',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.error),
+                            ),
+                            const Spacer(),
+                          ],
                         ),
                         const SizedBox(height: 6),
                         ...widget.absentUids.map(
@@ -707,23 +799,53 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                                 .doc(uid)
                                 .get(),
                             builder: (_, snap) {
-                              final name = snap.data?.exists == true
-                                  ? (snap.data!.data() as Map)[
-                                          'displayName'] as String? ??
-                                      uid
-                                  : uid;
+                              final name =
+                                  snap.data?.exists == true
+                                      ? (snap.data!.data()
+                                              as Map)[
+                                              'displayName']
+                                          as String? ??
+                                          uid
+                                      : uid;
                               return Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.only(
+                                    bottom: 6),
                                 child: Row(
                                   children: [
                                     const Icon(Icons.close,
                                         size: 14,
                                         color: AppTheme.error),
                                     const SizedBox(width: 6),
-                                    Text(name,
-                                        style: const TextStyle(
-                                            fontSize: 13,
-                                            color: AppTheme.textSecondary)),
+                                    Expanded(
+                                      child: Text(name,
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme
+                                                  .textSecondary)),
+                                    ),
+                                    // Check-in button for absent student
+                                    if (widget.canCheckIn)
+                                      TextButton(
+                                        onPressed: () =>
+                                            _checkInStudent(
+                                                uid, name),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor:
+                                              AppTheme.success,
+                                          padding: const EdgeInsets
+                                              .symmetric(
+                                                  horizontal: 8,
+                                                  vertical: 2),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize
+                                                  .shrinkWrap,
+                                        ),
+                                        child: const Text(
+                                            'Check In',
+                                            style: TextStyle(
+                                                fontSize: 11)),
+                                      ),
                                   ],
                                 ),
                               );
@@ -737,6 +859,55 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
         ],
       ),
     );
+  }
+
+  Future<void> _checkInStudent(String uid, String name) async {
+    try {
+      // Check if already checked in (concurrent update)
+      final existing = await widget.db
+          .collection('checkins')
+          .where('uid', isEqualTo: uid)
+          .where('date', isEqualTo: widget.todayKey)
+          .limit(1)
+          .get();
+      if (existing.docs.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('$name is already checked in'),
+                duration: const Duration(seconds: 2)),
+          );
+        }
+        return;
+      }
+      await widget.db.collection('checkins').add({
+        'uid': uid,
+        'name': name,
+        'checkedInBy': widget.user.uid,
+        'checkedInByName': widget.user.displayName,
+        'date': widget.todayKey,
+        'timestamp': FieldValue.serverTimestamp(),
+        'checkOutTime': null,
+        'status': 'checkedIn',
+        'classId': widget.groupId,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('$name checked in!'),
+              backgroundColor: AppTheme.success,
+              duration: const Duration(seconds: 2)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: AppTheme.error),
+        );
+      }
+    }
   }
 }
 
@@ -758,7 +929,8 @@ class _Badge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(ok ? Icons.check : Icons.close, size: 11, color: color),
+          Icon(ok ? Icons.check : Icons.close,
+              size: 11, color: color),
           const SizedBox(width: 3),
           Text(label,
               style: TextStyle(

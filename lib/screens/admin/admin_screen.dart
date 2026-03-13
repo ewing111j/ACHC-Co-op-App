@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../utils/app_theme.dart';
 import 'manage_members_screen.dart';
 import 'attendance_history_screen.dart';
+import 'coop_calendar_screen.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -214,7 +215,8 @@ class _AdminScreenState extends State<AdminScreen> {
         'icon': Icons.settings_outlined,
         'label': 'Co-op\nSettings',
         'color': const Color(0xFF7B1FA2),
-        'action': () => _showComingSoon(context, 'Co-op Settings'),
+        'action': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const CoopCalendarScreen())),
       },
     ];
 
@@ -458,15 +460,6 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showComingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$feature - Coming soon!'),
-        behavior: SnackBarBehavior.floating,
       ),
     );
   }

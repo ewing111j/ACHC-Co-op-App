@@ -23,6 +23,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
   DateTime _selectedDay = DateTime.now();
   CalendarFormat _calFormat = CalendarFormat.month;
   Map<DateTime, List<EventModel>> _events = {};
+  String? _coopWeekLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCoopWeekLabel(_focusedDay);
+  }
+
+  Future<void> _loadCoopWeekLabel(DateTime day) async {
+    try {
+      final monday = day.subtract(Duration(days: day.weekday - 1));
+      final key = DateFormat('yyyy-MM-dd').format(monday);
+      final doc = await _db.collection('coopCalendar').doc(key).get();
+      if (mounted) {
+        setState(() {
+          if (doc.exists) {
+            final d = doc.data();
+            _coopWeekLabel = d != null ? d['label'] as String? : null;
+          } else {
+            _coopWeekLabel = null;
+          }
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +106,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       _selectedDay = sel;
                       _focusedDay = foc;
                     });
+                    _loadCoopWeekLabel(foc);
                   },
                   onFormatChanged: (f) => setState(() => _calFormat = f),
                   calendarStyle: CalendarStyle(
@@ -105,6 +131,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ),
               ),
               AppTheme.goldDivider(),
+              // Co-op week label banner
+              if (_coopWeekLabel != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  color: AppTheme.navy.withValues(alpha: 0.05),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.school_outlined,
+                          size: 14, color: AppTheme.navy),
+                      const SizedBox(width: 8),
+                      Text(
+                        _coopWeekLabel!,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.navy,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
               // Events for selected day
               Expanded(
                 child: selectedEvents.isEmpty

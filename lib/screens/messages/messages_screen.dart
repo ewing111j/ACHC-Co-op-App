@@ -1,7 +1,10 @@
 // lib/screens/messages/messages_screen.dart
-// Two messaging sections:
-// 1) Committee & Class – admin-created group chats; auto-appear for assigned members
-// 2) Personal – direct messages and user-created group chats
+// Unified messaging: Group chats (Committee/Class/Other) + Personal
+// - No Committee/Class tabs when creating new message
+// - Intelligent search (prioritises first-letter name matches)
+// - Messages sorted by recency
+// - Students see only their class groups
+// - Admin can create groups from messages tab with auto-created group chat
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -21,16 +24,23 @@ class _MessagesScreenState extends State<MessagesScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _db = FirebaseFirestore.instance;
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _searchCtrl.addListener(() {
+      setState(() => _searchQuery = _searchCtrl.text.toLowerCase());
+    });
+    _tabController.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -46,22 +56,55 @@ class _MessagesScreenState extends State<MessagesScreen>
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.school_outlined, size: 18), text: 'Committee & Class'),
-            Tab(icon: Icon(Icons.chat_bubble_outline, size: 18), text: 'Personal'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(96),
+          child: Column(
+            children: [
+              TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(icon: Icon(Icons.school_outlined, size: 18), text: 'Groups'),
+                  Tab(icon: Icon(Icons.chat_bubble_outline, size: 18), text: 'Personal'),
+                ],
+              ),
+              // Intelligent search bar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+                child: TextField(
+                  controller: _searchCtrl,
+                  style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'Search conversations…',
+                    hintStyle: const TextStyle(fontSize: 13),
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () => _searchCtrl.clear(),
+                          )
+                        : null,
+                    isDense: true,
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.15),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
-          // Admin: manage committee/class groups in tab 0
           if (_tabController.index == 0 && user.isAdmin)
             IconButton(
               icon: const Icon(Icons.add_circle_outline),
               tooltip: 'Create Group',
-              onPressed: () => _showCreateGroupSheet(context, user, isCommittee: true),
+              onPressed: () => _showCreateGroupSheet(context, user),
             ),
-          // Everyone (non-kid): create personal chats in tab 1
           if (_tabController.index == 1 && !user.isStudent)
             IconButton(
               icon: const Icon(Icons.add),
@@ -73,22 +116,19 @@ class _MessagesScreenState extends State<MessagesScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Tab 0 – Committee & Class
-          _CommitteeClassTab(user: user, db: _db),
-          // Tab 1 – Personal
-          _PersonalTab(user: user, db: _db),
+          _GroupsTab(user: user, db: _db, searchQuery: _searchQuery),
+          _PersonalTab(user: user, db: _db, searchQuery: _searchQuery),
         ],
       ),
     );
   }
 
-  void _showCreateGroupSheet(BuildContext context, UserModel user,
-      {required bool isCommittee}) {
+  void _showCreateGroupSheet(BuildContext context, UserModel user) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _CreateGroupSheet(user: user, db: _db, isCommitteeType: true),
+      builder: (_) => _CreateGroupSheet(user: user, db: _db),
     );
   }
 
@@ -102,11 +142,36 @@ class _MessagesScreenState extends State<MessagesScreen>
   }
 }
 
-// ── COMMITTEE & CLASS TAB ────────────────────────────────────────
-class _CommitteeClassTab extends StatelessWidget {
+// ── Smart search ranking: starts-with first-letter > contains ──────
+List<T> _rankBySearch<T>(
+    List<T> items, String query, String Function(T) getName) {
+  if (query.isEmpty) return items;
+  final q = query.toLowerCase();
+
+  // Group 1: name starts with query
+  final starts = items.where((i) {
+    final name = getName(i).toLowerCase();
+    final parts = name.split(' ');
+    return parts.any((p) => p.startsWith(q));
+  }).toList();
+
+  // Group 2: contains but not in group 1
+  final contains = items
+      .where((i) =>
+          !starts.contains(i) &&
+          getName(i).toLowerCase().contains(q))
+      .toList();
+
+  return [...starts, ...contains];
+}
+
+// ── GROUPS TAB ───────────────────────────────────────────────────
+class _GroupsTab extends StatelessWidget {
   final UserModel user;
   final FirebaseFirestore db;
-  const _CommitteeClassTab({required this.user, required this.db});
+  final String searchQuery;
+  const _GroupsTab(
+      {required this.user, required this.db, required this.searchQuery});
 
   @override
   Widget build(BuildContext context) {
@@ -120,42 +185,61 @@ class _CommitteeClassTab extends StatelessWidget {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        final docs = snap.data?.docs ?? [];
+        var docs = snap.data?.docs ?? [];
 
-        // Sort in-memory by last message time
+        // Students only see their classes
+        if (user.isStudent) {
+          docs = docs
+              .where((d) =>
+                  (d.data() as Map)['groupSubType'] == 'class')
+              .toList();
+        }
+
+        // Sort by recency
         final sorted = [...docs];
         sorted.sort((a, b) {
           final aT = (a.data() as Map)['lastMessageAt'];
           final bT = (b.data() as Map)['lastMessageAt'];
           if (aT == null) return 1;
           if (bT == null) return -1;
-          return (bT as Timestamp)
-              .compareTo(aT as Timestamp);
+          return (bT as Timestamp).compareTo(aT as Timestamp);
         });
 
-        if (sorted.isEmpty) {
+        // Filter by search
+        final filtered = _rankBySearch(
+          sorted,
+          searchQuery,
+          (doc) => (doc.data() as Map)['name'] as String? ?? '',
+        );
+
+        if (filtered.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.school_outlined, size: 64, color: AppTheme.textHint),
+                Icon(Icons.school_outlined,
+                    size: 64, color: AppTheme.textHint),
                 const SizedBox(height: 16),
-                const Text('No committee or class groups yet',
-                    style: TextStyle(fontSize: 15, color: AppTheme.textSecondary)),
-                const SizedBox(height: 8),
-                if (user.isAdmin)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                Text(
+                  searchQuery.isNotEmpty
+                      ? 'No groups match "$searchQuery"'
+                      : 'No group chats yet',
+                  style: const TextStyle(
+                      fontSize: 15,
+                      color: AppTheme.textSecondary),
+                ),
+                if (searchQuery.isEmpty && user.isAdmin) ...[
+                  const SizedBox(height: 8),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 32),
                     child: Text(
-                      'Tap + above to create a committee or class group chat. '
-                      'Members will see it automatically.',
+                      'Tap + above to create a committee, class, or other group chat.',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppTheme.textHint, fontSize: 13),
+                      style: TextStyle(
+                          color: AppTheme.textHint, fontSize: 13),
                     ),
-                  )
-                else
-                  const Text('Your admin will add you to group chats',
-                      style: TextStyle(color: AppTheme.textHint, fontSize: 13)),
+                  ),
+                ]
               ],
             ),
           );
@@ -165,7 +249,8 @@ class _CommitteeClassTab extends StatelessWidget {
           children: [
             if (user.isAdmin)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
                 color: AppTheme.navy.withValues(alpha: 0.06),
                 child: Row(
                   children: [
@@ -173,7 +258,9 @@ class _CommitteeClassTab extends StatelessWidget {
                         size: 16, color: AppTheme.navy),
                     const SizedBox(width: 8),
                     const Text('You manage these group chats',
-                        style: TextStyle(fontSize: 12, color: AppTheme.navy,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.navy,
                             fontWeight: FontWeight.w600)),
                     const Spacer(),
                     TextButton.icon(
@@ -182,13 +269,15 @@ class _CommitteeClassTab extends StatelessWidget {
                         isScrollControlled: true,
                         backgroundColor: Colors.transparent,
                         builder: (_) =>
-                            _CreateGroupSheet(user: user, db: db, isCommitteeType: true),
+                            _CreateGroupSheet(user: user, db: db),
                       ),
                       icon: const Icon(Icons.add, size: 14),
-                      label: const Text('New Group', style: TextStyle(fontSize: 12)),
+                      label: const Text('New Group',
+                          style: TextStyle(fontSize: 12)),
                       style: TextButton.styleFrom(
                           foregroundColor: AppTheme.navy,
-                          padding: const EdgeInsets.symmetric(horizontal: 8)),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8)),
                     ),
                   ],
                 ),
@@ -196,16 +285,20 @@ class _CommitteeClassTab extends StatelessWidget {
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: sorted.length,
+                itemCount: filtered.length,
                 itemBuilder: (ctx, i) {
-                  final d = sorted[i].data() as Map<String, dynamic>;
-                  final roomId = sorted[i].id;
+                  final d =
+                      filtered[i].data() as Map<String, dynamic>;
+                  final roomId = filtered[i].id;
+                  final subType =
+                      d['groupSubType'] as String? ?? 'committee';
                   return _RoomTile(
                     roomId: roomId,
                     data: d,
                     user: user,
                     db: db,
                     isCommitteeRoom: true,
+                    groupSubType: subType,
                   );
                 },
               ),
@@ -221,7 +314,9 @@ class _CommitteeClassTab extends StatelessWidget {
 class _PersonalTab extends StatelessWidget {
   final UserModel user;
   final FirebaseFirestore db;
-  const _PersonalTab({required this.user, required this.db});
+  final String searchQuery;
+  const _PersonalTab(
+      {required this.user, required this.db, required this.searchQuery});
 
   @override
   Widget build(BuildContext context) {
@@ -246,19 +341,32 @@ class _PersonalTab extends StatelessWidget {
           return (bT as Timestamp).compareTo(aT as Timestamp);
         });
 
-        if (sorted.isEmpty) {
+        final filtered = _rankBySearch(
+          sorted,
+          searchQuery,
+          (doc) => (doc.data() as Map)['name'] as String? ?? '',
+        );
+
+        if (filtered.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.chat_bubble_outline, size: 64, color: AppTheme.textHint),
+                Icon(Icons.chat_bubble_outline,
+                    size: 64, color: AppTheme.textHint),
                 const SizedBox(height: 16),
-                const Text('No personal messages yet',
-                    style: TextStyle(fontSize: 15, color: AppTheme.textSecondary)),
-                const SizedBox(height: 8),
-                if (!user.isStudent)
-                  const Text('Tap + to start a direct message or group chat',
-                      style: TextStyle(color: AppTheme.textHint, fontSize: 13)),
+                Text(
+                  searchQuery.isNotEmpty
+                      ? 'No messages match "$searchQuery"'
+                      : 'No personal messages yet',
+                  style: const TextStyle(
+                      fontSize: 15,
+                      color: AppTheme.textSecondary),
+                ),
+                if (searchQuery.isEmpty && !user.isStudent)
+                  const Text('Tap + to start a conversation',
+                      style: TextStyle(
+                          color: AppTheme.textHint, fontSize: 13)),
               ],
             ),
           );
@@ -266,10 +374,10 @@ class _PersonalTab extends StatelessWidget {
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: sorted.length,
+          itemCount: filtered.length,
           itemBuilder: (ctx, i) {
-            final d = sorted[i].data() as Map<String, dynamic>;
-            final roomId = sorted[i].id;
+            final d = filtered[i].data() as Map<String, dynamic>;
+            final roomId = filtered[i].id;
             return _RoomTile(
               roomId: roomId,
               data: d,
@@ -291,12 +399,14 @@ class _RoomTile extends StatelessWidget {
   final UserModel user;
   final FirebaseFirestore db;
   final bool isCommitteeRoom;
+  final String groupSubType;
   const _RoomTile({
     required this.roomId,
     required this.data,
     required this.user,
     required this.db,
     required this.isCommitteeRoom,
+    this.groupSubType = 'committee',
   });
 
   @override
@@ -307,35 +417,55 @@ class _RoomTile extends StatelessWidget {
     final isGroup = data['isGroup'] as bool? ?? false;
     final lastAt = data['lastMessageAt'] != null
         ? DateTime.fromMillisecondsSinceEpoch(
-            (data['lastMessageAt'] as Timestamp).millisecondsSinceEpoch)
+            (data['lastMessageAt'] as Timestamp)
+                .millisecondsSinceEpoch)
         : null;
-    final color = isCommitteeRoom ? AppTheme.navy : AppTheme.messagesColor;
+
+    Color color;
+    IconData icon;
+    if (!isCommitteeRoom) {
+      color = AppTheme.messagesColor;
+      icon = isGroup ? Icons.group : Icons.person;
+    } else {
+      switch (groupSubType) {
+        case 'class':
+          color = AppTheme.navy;
+          icon = Icons.school_outlined;
+          break;
+        case 'other':
+          color = AppTheme.calendarColor;
+          icon = Icons.group_work_outlined;
+          break;
+        default:
+          color = const Color(0xFF7B1FA2);
+          icon = Icons.groups_outlined;
+      }
+    }
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: Stack(
         children: [
           CircleAvatar(
             radius: 24,
             backgroundColor: color.withValues(alpha: 0.12),
-            child: Icon(
-              isCommitteeRoom
-                  ? Icons.school_outlined
-                  : (isGroup ? Icons.group : Icons.person),
-              color: color,
-              size: 22,
-            ),
+            child: Icon(icon, color: color, size: 22),
           ),
           if (unread > 0)
             Positioned(
-              right: 0, top: 0,
+              right: 0,
+              top: 0,
               child: Container(
-                width: 16, height: 16,
-                decoration: BoxDecoration(
+                width: 16,
+                height: 16,
+                decoration: const BoxDecoration(
                     color: AppTheme.error, shape: BoxShape.circle),
                 child: Center(
                   child: Text('$unread',
-                      style: const TextStyle(color: Colors.white, fontSize: 9,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
                           fontWeight: FontWeight.w700)),
                 ),
               ),
@@ -344,21 +474,30 @@ class _RoomTile extends StatelessWidget {
       ),
       title: Text(name,
           style: TextStyle(
-              fontWeight: unread > 0 ? FontWeight.w700 : FontWeight.w600,
+              fontWeight:
+                  unread > 0 ? FontWeight.w700 : FontWeight.w600,
               fontSize: 14)),
       subtitle: Text(lastMsg,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              color: unread > 0 ? AppTheme.textPrimary : AppTheme.textHint,
+              color: unread > 0
+                  ? AppTheme.textPrimary
+                  : AppTheme.textHint,
               fontSize: 12,
-              fontWeight: unread > 0 ? FontWeight.w500 : FontWeight.normal)),
+              fontWeight: unread > 0
+                  ? FontWeight.w500
+                  : FontWeight.normal)),
       trailing: lastAt != null
           ? Text(_formatTime(lastAt),
-              style: const TextStyle(fontSize: 11, color: AppTheme.textHint))
+              style: const TextStyle(
+                  fontSize: 11, color: AppTheme.textHint))
           : null,
       onTap: () {
-        db.collection('chatRooms').doc(roomId).update({'unread_${user.uid}': 0});
+        db
+            .collection('chatRooms')
+            .doc(roomId)
+            .update({'unread_${user.uid}': 0});
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -385,12 +524,12 @@ class _RoomTile extends StatelessWidget {
 }
 
 // ── CREATE GROUP SHEET (Admin) ─────────────────────────────────────
+// Single-screen: group name + type chip + member checkboxes
+// Auto-creates a group chat when a class/committee is created
 class _CreateGroupSheet extends StatefulWidget {
   final UserModel user;
   final FirebaseFirestore db;
-  final bool isCommitteeType;
-  const _CreateGroupSheet(
-      {required this.user, required this.db, required this.isCommitteeType});
+  const _CreateGroupSheet({required this.user, required this.db});
 
   @override
   State<_CreateGroupSheet> createState() => _CreateGroupSheetState();
@@ -399,22 +538,26 @@ class _CreateGroupSheet extends StatefulWidget {
 class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _allUsers = [];
+  List<Map<String, dynamic>> _filteredUsers = [];
   final Set<String> _selectedUids = {};
   bool _loading = true;
   bool _saving = false;
-  String _groupType = 'committee'; // committee | class
+  String _groupType = 'committee'; // committee | class | other
 
   @override
   void initState() {
     super.initState();
     _loadUsers();
+    _searchCtrl.addListener(_filterUsers);
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -429,15 +572,32 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
             })
         .where((u) => u['uid'] != widget.user.uid)
         .toList();
-    users.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-    if (mounted) setState(() { _allUsers = users; _loading = false; });
+    users.sort(
+        (a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    if (mounted) {
+      setState(() {
+        _allUsers = users;
+        _filteredUsers = users;
+        _loading = false;
+      });
+    }
+  }
+
+  void _filterUsers() {
+    final q = _searchCtrl.text.toLowerCase();
+    setState(() {
+      _filteredUsers = _rankBySearch(
+        _allUsers,
+        q,
+        (u) => u['name'] as String,
+      );
+    });
   }
 
   Future<void> _create() async {
     if (_nameCtrl.text.trim().isEmpty) return;
     setState(() => _saving = true);
     try {
-      // Admin is always a member
       final allMembers = [widget.user.uid, ..._selectedUids];
       final allMemberNames = <String>[widget.user.displayName];
       for (final uid in _selectedUids) {
@@ -446,6 +606,7 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
         allMemberNames.add(u['name'] as String);
       }
 
+      // Create chat room
       await widget.db.collection('chatRooms').add({
         'name': _nameCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
@@ -460,6 +621,20 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
         'lastMessageAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      // Also create a group record in 'groups' collection for attendance
+      if (_groupType == 'class' || _groupType == 'committee') {
+        await widget.db.collection('groups').add({
+          'name': _nameCtrl.text.trim(),
+          'type': _groupType,
+          'memberUids': allMembers,
+          'mentorUids': [],
+          'secondUids': [],
+          'createdBy': widget.user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -469,31 +644,33 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
-      initialChildSize: 0.9,
-      maxChildSize: 0.95,
+      initialChildSize: 0.92,
+      maxChildSize: 0.97,
       minChildSize: 0.6,
       builder: (_, ctrl) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
-            // Handle
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 8),
               decoration: BoxDecoration(
                   color: Colors.grey[300],
                   borderRadius: BorderRadius.circular(2)),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 20, vertical: 8),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('Create Group Chat',
-                        style: const TextStyle(
+                    child: const Text('Create Group Chat',
+                        style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             fontFamily: 'Georgia')),
@@ -502,8 +679,10 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                     onPressed: _saving ? null : _create,
                     child: _saving
                         ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2))
                         : const Text('Create'),
                   ),
                 ],
@@ -515,7 +694,7 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                 controller: ctrl,
                 padding: const EdgeInsets.all(20),
                 children: [
-                  // Type selector
+                  // Type selector — Committee | Class | Other
                   Row(
                     children: [
                       Expanded(
@@ -523,16 +702,28 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                           label: 'Committee',
                           icon: Icons.groups_outlined,
                           selected: _groupType == 'committee',
-                          onTap: () => setState(() => _groupType = 'committee'),
+                          onTap: () =>
+                              setState(() => _groupType = 'committee'),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _TypeChip(
                           label: 'Class',
                           icon: Icons.school_outlined,
                           selected: _groupType == 'class',
-                          onTap: () => setState(() => _groupType = 'class'),
+                          onTap: () =>
+                              setState(() => _groupType = 'class'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _TypeChip(
+                          label: 'Other',
+                          icon: Icons.group_work_outlined,
+                          selected: _groupType == 'other',
+                          onTap: () =>
+                              setState(() => _groupType = 'other'),
                         ),
                       ),
                     ],
@@ -540,10 +731,16 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: _nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Group Name',
-                      hintText: 'e.g. Science Committee, Math 101',
-                      prefixIcon: Icon(Icons.group_work_outlined),
+                    decoration: InputDecoration(
+                      labelText: 'Group Name *',
+                      hintText: _groupType == 'class'
+                          ? 'e.g. Math 101'
+                          : _groupType == 'committee'
+                              ? 'e.g. Science Committee'
+                              : 'e.g. Parent Helpers',
+                      prefixIcon:
+                          const Icon(Icons.group_work_outlined),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -552,6 +749,7 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                     decoration: const InputDecoration(
                       labelText: 'Description (optional)',
                       prefixIcon: Icon(Icons.info_outline),
+                      border: OutlineInputBorder(),
                     ),
                     maxLines: 2,
                   ),
@@ -560,18 +758,34 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                     children: [
                       const Text('Add Members',
                           style: TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15)),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15)),
                       const Spacer(),
                       Text('${_selectedUids.length} selected',
                           style: const TextStyle(
-                              color: AppTheme.textHint, fontSize: 13)),
+                              color: AppTheme.textHint,
+                              fontSize: 13)),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Search members
+                  TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      hintText: 'Search members…',
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   if (_loading)
                     const Center(child: CircularProgressIndicator())
                   else
-                    ..._allUsers.map((u) {
+                    ..._filteredUsers.map((u) {
                       final uid = u['uid'] as String;
                       final selected = _selectedUids.contains(uid);
                       final role = u['role'] as String;
@@ -581,13 +795,16 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                         value: selected,
                         onChanged: (v) {
                           setState(() {
-                            if (v == true) _selectedUids.add(uid);
-                            else _selectedUids.remove(uid);
+                            if (v == true)
+                              _selectedUids.add(uid);
+                            else
+                              _selectedUids.remove(uid);
                           });
                         },
                         secondary: CircleAvatar(
                           radius: 16,
-                          backgroundColor: AppTheme.navy.withValues(alpha: 0.1),
+                          backgroundColor:
+                              AppTheme.navy.withValues(alpha: 0.1),
                           child: Text(
                             (u['name'] as String).isNotEmpty
                                 ? (u['name'] as String)[0].toUpperCase()
@@ -599,10 +816,12 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                           ),
                         ),
                         title: Text(u['name'] as String,
-                            style: const TextStyle(fontSize: 13)),
+                            style:
+                                const TextStyle(fontSize: 13)),
                         subtitle: Text(role,
                             style: const TextStyle(
-                                fontSize: 11, color: AppTheme.textHint)),
+                                fontSize: 11,
+                                color: AppTheme.textHint)),
                       );
                     }),
                 ],
@@ -633,7 +852,8 @@ class _TypeChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.navy : AppTheme.surfaceVariant,
+          color:
+              selected ? AppTheme.navy : AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: selected ? AppTheme.navy : AppTheme.cardBorder),
@@ -641,13 +861,17 @@ class _TypeChip extends StatelessWidget {
         child: Column(
           children: [
             Icon(icon,
-                color: selected ? Colors.white : AppTheme.textSecondary,
+                color: selected
+                    ? Colors.white
+                    : AppTheme.textSecondary,
                 size: 20),
             const SizedBox(height: 4),
             Text(label,
                 style: TextStyle(
-                    color: selected ? Colors.white : AppTheme.textSecondary,
-                    fontSize: 12,
+                    color: selected
+                        ? Colors.white
+                        : AppTheme.textSecondary,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600)),
           ],
         ),
@@ -657,35 +881,40 @@ class _TypeChip extends StatelessWidget {
 }
 
 // ── NEW PERSONAL CHAT SHEET ────────────────────────────────────────
+// Unified: optional group name field + member list with checkboxes
+// No separate Committee/Class tabs
 class _NewPersonalChatSheet extends StatefulWidget {
   final UserModel user;
   final FirebaseFirestore db;
-  const _NewPersonalChatSheet({required this.user, required this.db});
+  const _NewPersonalChatSheet(
+      {required this.user, required this.db});
 
   @override
-  State<_NewPersonalChatSheet> createState() => _NewPersonalChatSheetState();
+  State<_NewPersonalChatSheet> createState() =>
+      _NewPersonalChatSheetState();
 }
 
-class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabs;
+class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet> {
   List<Map<String, dynamic>> _allUsers = [];
+  List<Map<String, dynamic>> _filteredUsers = [];
   final Set<String> _selectedUids = {};
   final _groupNameCtrl = TextEditingController();
+  final _searchCtrl = TextEditingController();
   bool _loading = true;
   bool _saving = false;
+  bool _isGroupMode = false; // toggle between DM and group
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 2, vsync: this);
     _loadUsers();
+    _searchCtrl.addListener(_filterUsers);
   }
 
   @override
   void dispose() {
-    _tabs.dispose();
     _groupNameCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -699,12 +928,29 @@ class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
             })
         .where((u) => u['uid'] != widget.user.uid)
         .toList();
-    users.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-    if (mounted) setState(() { _allUsers = users; _loading = false; });
+    users.sort(
+        (a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    if (mounted) {
+      setState(() {
+        _allUsers = users;
+        _filteredUsers = users;
+        _loading = false;
+      });
+    }
+  }
+
+  void _filterUsers() {
+    final q = _searchCtrl.text.toLowerCase();
+    setState(() {
+      _filteredUsers = _rankBySearch(
+        _allUsers,
+        q,
+        (u) => u['name'] as String,
+      );
+    });
   }
 
   Future<void> _startDirect(String otherUid, String otherName) async {
-    // Check if DM already exists
     final snap = await widget.db
         .collection('chatRooms')
         .where('members', arrayContains: widget.user.uid)
@@ -713,8 +959,12 @@ class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
         .get();
     String? existingId;
     for (final doc in snap.docs) {
-      final members = List<String>.from(doc.data()['members'] as List? ?? []);
-      if (members.contains(otherUid)) { existingId = doc.id; break; }
+      final members =
+          List<String>.from(doc.data()['members'] as List? ?? []);
+      if (members.contains(otherUid)) {
+        existingId = doc.id;
+        break;
+      }
     }
     if (existingId == null) {
       final ref = widget.db.collection('chatRooms').doc();
@@ -748,7 +998,8 @@ class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
   }
 
   Future<void> _createGroup() async {
-    if (_selectedUids.isEmpty || _groupNameCtrl.text.trim().isEmpty) return;
+    if (_selectedUids.isEmpty) return;
+    final groupName = _groupNameCtrl.text.trim();
     setState(() => _saving = true);
     try {
       final allMembers = [widget.user.uid, ..._selectedUids];
@@ -758,8 +1009,12 @@ class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
             orElse: () => {'name': uid});
         allNames.add(u['name'] as String);
       }
+      // Auto-generate name from members if not provided
+      final name = groupName.isNotEmpty
+          ? groupName
+          : allNames.take(3).join(', ');
       await widget.db.collection('chatRooms').add({
-        'name': _groupNameCtrl.text.trim(),
+        'name': name,
         'roomType': 'personal',
         'isGroup': true,
         'members': allMembers,
@@ -778,126 +1033,226 @@ class _NewPersonalChatSheetState extends State<_NewPersonalChatSheet>
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      maxChildSize: 0.95,
+      initialChildSize: 0.88,
+      maxChildSize: 0.97,
       minChildSize: 0.5,
       builder: (_, ctrl) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 8),
               decoration: BoxDecoration(
                   color: Colors.grey[300],
                   borderRadius: BorderRadius.circular(2)),
             ),
+            // Header
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-              child: Text('New Message',
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'Georgia')),
-            ),
-            TabBar(
-              controller: _tabs,
-              tabs: const [
-                Tab(text: 'Direct Message'),
-                Tab(text: 'Group Chat'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabs,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 20, vertical: 4),
+              child: Row(
                 children: [
-                  // Direct messages
-                  _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : ListView.builder(
-                          controller: ctrl,
-                          itemCount: _allUsers.length,
-                          itemBuilder: (_, i) {
-                            final u = _allUsers[i];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                radius: 18,
-                                backgroundColor:
-                                    AppTheme.messagesColor.withValues(alpha: 0.1),
-                                child: Text(
-                                  (u['name'] as String)[0].toUpperCase(),
-                                  style: const TextStyle(
-                                      color: AppTheme.messagesColor,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              title: Text(u['name'] as String,
-                                  style: const TextStyle(fontSize: 14)),
-                              subtitle: Text(u['role'] as String,
-                                  style: const TextStyle(
-                                      fontSize: 11, color: AppTheme.textHint)),
-                              onTap: () =>
-                                  _startDirect(u['uid'] as String, u['name'] as String),
-                            );
-                          },
-                        ),
-                  // Group chat
-                  ListView(
-                    controller: ctrl,
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      TextField(
-                        controller: _groupNameCtrl,
-                        decoration: const InputDecoration(
-                            labelText: 'Group Name',
-                            prefixIcon: Icon(Icons.group_outlined)),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                          'Select Members (${_selectedUids.length} selected)',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      if (_loading)
-                        const Center(child: CircularProgressIndicator())
-                      else
-                        ..._allUsers.map((u) {
-                          final uid = u['uid'] as String;
-                          return CheckboxListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            value: _selectedUids.contains(uid),
-                            onChanged: (v) {
-                              setState(() {
-                                if (v == true) _selectedUids.add(uid);
-                                else _selectedUids.remove(uid);
-                              });
-                            },
-                            title: Text(u['name'] as String,
-                                style: const TextStyle(fontSize: 13)),
-                            subtitle: Text(u['role'] as String,
-                                style: const TextStyle(
-                                    fontSize: 11, color: AppTheme.textHint)),
-                          );
-                        }),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _saving ? null : _createGroup,
-                          child: _saving
-                              ? const SizedBox(
-                                  width: 20, height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
-                              : const Text('Create Group Chat'),
-                        ),
-                      ),
-                    ],
+                  Expanded(
+                    child: const Text('New Message',
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'Georgia')),
                   ),
+                  if (_isGroupMode)
+                    TextButton(
+                      onPressed: _saving ? null : _createGroup,
+                      child: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2))
+                          : const Text('Create'),
+                    ),
+                ],
+              ),
+            ),
+            // Mode toggle
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () =>
+                          setState(() => _isGroupMode = false),
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: !_isGroupMode
+                              ? AppTheme.navy
+                              : AppTheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('Direct Message',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: !_isGroupMode
+                                    ? Colors.white
+                                    : AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () =>
+                          setState(() => _isGroupMode = true),
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _isGroupMode
+                              ? AppTheme.navy
+                              : AppTheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('Group Chat',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: _isGroupMode
+                                    ? Colors.white
+                                    : AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                controller: ctrl,
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Optional group name (group mode only)
+                  if (_isGroupMode) ...[
+                    TextField(
+                      controller: _groupNameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Group Name (optional)',
+                        hintText: 'Auto-generated from member names',
+                        prefixIcon: Icon(Icons.group_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // Member search
+                  TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      hintText: _isGroupMode
+                          ? 'Search members to add…'
+                          : 'Search people…',
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_isGroupMode && _selectedUids.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                          '${_selectedUids.length} member(s) selected',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.navy,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  if (_loading)
+                    const Center(child: CircularProgressIndicator())
+                  else
+                    ..._filteredUsers.map((u) {
+                      final uid = u['uid'] as String;
+                      if (_isGroupMode) {
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          value: _selectedUids.contains(uid),
+                          onChanged: (v) {
+                            setState(() {
+                              if (v == true)
+                                _selectedUids.add(uid);
+                              else
+                                _selectedUids.remove(uid);
+                            });
+                          },
+                          secondary: CircleAvatar(
+                            radius: 16,
+                            backgroundColor:
+                                AppTheme.messagesColor.withValues(
+                                    alpha: 0.1),
+                            child: Text(
+                              (u['name'] as String).isNotEmpty
+                                  ? (u['name'] as String)[0]
+                                      .toUpperCase()
+                                  : '?',
+                              style: const TextStyle(
+                                  color: AppTheme.messagesColor,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12),
+                            ),
+                          ),
+                          title: Text(u['name'] as String,
+                              style:
+                                  const TextStyle(fontSize: 13)),
+                          subtitle: Text(u['role'] as String,
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textHint)),
+                        );
+                      } else {
+                        return ListTile(
+                          leading: CircleAvatar(
+                            radius: 18,
+                            backgroundColor:
+                                AppTheme.messagesColor.withValues(
+                                    alpha: 0.1),
+                            child: Text(
+                              (u['name'] as String).isNotEmpty
+                                  ? (u['name'] as String)[0]
+                                      .toUpperCase()
+                                  : '?',
+                              style: const TextStyle(
+                                  color: AppTheme.messagesColor,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          title: Text(u['name'] as String,
+                              style:
+                                  const TextStyle(fontSize: 14)),
+                          subtitle: Text(u['role'] as String,
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textHint)),
+                          onTap: () => _startDirect(
+                              uid, u['name'] as String),
+                        );
+                      }
+                    }),
                 ],
               ),
             ),
@@ -947,7 +1302,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadRoomData() async {
-    final doc = await widget.db.collection('chatRooms').doc(widget.roomId).get();
+    final doc = await widget.db
+        .collection('chatRooms')
+        .doc(widget.roomId)
+        .get();
     if (mounted && doc.exists) {
       setState(() => _roomData = doc.data());
     }
@@ -976,10 +1334,12 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.roomName,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w700)),
             if (memberCount > 0)
               Text('$memberCount members',
-                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  style: const TextStyle(
+                      fontSize: 11, color: Colors.white70)),
           ],
         ),
         leading: IconButton(
@@ -991,9 +1351,9 @@ class _ChatScreenState extends State<ChatScreen> {
             IconButton(
               icon: const Icon(Icons.poll_outlined),
               tooltip: 'Create Poll',
-              onPressed: () => setState(() => _showPoll = !_showPoll),
+              onPressed: () =>
+                  setState(() => _showPoll = !_showPoll),
             ),
-          // Admin can manage committee room members
           if (widget.isCommitteeRoom && widget.user.isAdmin)
             IconButton(
               icon: const Icon(Icons.manage_accounts_outlined),
@@ -1014,13 +1374,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   .limitToLast(100)
                   .snapshots(),
               builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                if (snap.connectionState ==
+                    ConnectionState.waiting) {
+                  return const Center(
+                      child: CircularProgressIndicator());
                 }
                 final docs = snap.data?.docs ?? [];
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollCtrl.hasClients) {
-                    _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+                    _scrollCtrl.jumpTo(
+                        _scrollCtrl.position.maxScrollExtent);
                   }
                 });
                 return ListView.builder(
@@ -1028,7 +1391,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   padding: const EdgeInsets.all(16),
                   itemCount: docs.length,
                   itemBuilder: (_, i) {
-                    final d = docs[i].data() as Map<String, dynamic>;
+                    final d =
+                        docs[i].data() as Map<String, dynamic>;
                     final isMe = d['senderId'] == widget.user.uid;
                     final isPoll = d['type'] == 'poll';
                     return isPoll
@@ -1083,7 +1447,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'senderName': widget.user.displayName,
         'createdAt': FieldValue.serverTimestamp(),
       });
-      await widget.db.collection('chatRooms').doc(widget.roomId).update({
+      await widget.db
+          .collection('chatRooms')
+          .doc(widget.roomId)
+          .update({
         'lastMessage': text,
         'lastMessageAt': FieldValue.serverTimestamp(),
       });
@@ -1094,8 +1461,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendPoll() async {
     final question = _pollQCtrl.text.trim();
-    final opts =
-        _pollOpts.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
+    final opts = _pollOpts
+        .map((c) => c.text.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
     if (question.isEmpty || opts.length < 2) return;
     await widget.db
         .collection('chatRooms')
@@ -1110,7 +1479,10 @@ class _ChatScreenState extends State<ChatScreen> {
       'senderName': widget.user.displayName,
       'createdAt': FieldValue.serverTimestamp(),
     });
-    await widget.db.collection('chatRooms').doc(widget.roomId).update({
+    await widget.db
+        .collection('chatRooms')
+        .doc(widget.roomId)
+        .update({
       'lastMessage': '📊 Poll: $question',
       'lastMessageAt': FieldValue.serverTimestamp(),
     });
@@ -1151,12 +1523,15 @@ class _ManageMembersSheet extends StatefulWidget {
   });
 
   @override
-  State<_ManageMembersSheet> createState() => _ManageMembersSheetState();
+  State<_ManageMembersSheet> createState() =>
+      _ManageMembersSheetState();
 }
 
 class _ManageMembersSheetState extends State<_ManageMembersSheet> {
   List<Map<String, dynamic>> _allUsers = [];
+  List<Map<String, dynamic>> _filteredUsers = [];
   late Set<String> _memberUids;
+  final _searchCtrl = TextEditingController();
   bool _loading = true;
   bool _saving = false;
 
@@ -1166,6 +1541,13 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
     _memberUids = Set<String>.from(
         (widget.roomData['members'] as List?)?.cast<String>() ?? []);
     _loadUsers();
+    _searchCtrl.addListener(_filterUsers);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUsers() async {
@@ -1177,8 +1559,26 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
               'role': d.data()['role'] as String? ?? 'parent',
             })
         .toList();
-    users.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-    if (mounted) setState(() { _allUsers = users; _loading = false; });
+    users.sort(
+        (a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    if (mounted) {
+      setState(() {
+        _allUsers = users;
+        _filteredUsers = users;
+        _loading = false;
+      });
+    }
+  }
+
+  void _filterUsers() {
+    final q = _searchCtrl.text.toLowerCase();
+    setState(() {
+      _filteredUsers = _rankBySearch(
+        _allUsers,
+        q,
+        (u) => u['name'] as String,
+      );
+    });
   }
 
   Future<void> _save() async {
@@ -1190,7 +1590,10 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
             orElse: () => {'name': uid});
         names.add(u['name'] as String);
       }
-      await widget.db.collection('chatRooms').doc(widget.roomId).update({
+      await widget.db
+          .collection('chatRooms')
+          .doc(widget.roomId)
+          .update({
         'members': _memberUids.toList(),
         'memberNames': names,
       });
@@ -1210,19 +1613,22 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
       builder: (_, ctrl) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
             Container(
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 8),
               decoration: BoxDecoration(
                   color: Colors.grey[300],
                   borderRadius: BorderRadius.circular(2)),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 20, vertical: 8),
               child: Row(
                 children: [
                   const Expanded(
@@ -1236,13 +1642,31 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
                     onPressed: _saving ? null : _save,
                     child: _saving
                         ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2))
                         : const Text('Save'),
                   ),
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search members…',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
             const Divider(height: 1),
             Expanded(
               child: _loading
@@ -1250,11 +1674,12 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
                   : ListView.builder(
                       controller: ctrl,
                       padding: const EdgeInsets.all(8),
-                      itemCount: _allUsers.length,
+                      itemCount: _filteredUsers.length,
                       itemBuilder: (_, i) {
-                        final u = _allUsers[i];
+                        final u = _filteredUsers[i];
                         final uid = u['uid'] as String;
-                        final isAdmin = uid == widget.currentUser.uid;
+                        final isAdmin =
+                            uid == widget.currentUser.uid;
                         return CheckboxListTile(
                           dense: true,
                           value: _memberUids.contains(uid),
@@ -1262,14 +1687,19 @@ class _ManageMembersSheetState extends State<_ManageMembersSheet> {
                               ? null
                               : (v) {
                                   setState(() {
-                                    if (v == true) _memberUids.add(uid);
-                                    else _memberUids.remove(uid);
+                                    if (v == true)
+                                      _memberUids.add(uid);
+                                    else
+                                      _memberUids.remove(uid);
                                   });
                                 },
                           title: Text(u['name'] as String,
-                              style: const TextStyle(fontSize: 13)),
+                              style:
+                                  const TextStyle(fontSize: 13)),
                           subtitle: Text(
-                              isAdmin ? 'Admin (always member)' : u['role'] as String,
+                              isAdmin
+                                  ? 'Admin (always member)'
+                                  : u['role'] as String,
                               style: TextStyle(
                                   fontSize: 11,
                                   color: isAdmin
@@ -1302,8 +1732,9 @@ class _MessageBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
-        crossAxisAlignment:
-            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           if (!isMe)
             Padding(
@@ -1316,15 +1747,21 @@ class _MessageBubble extends StatelessWidget {
             ),
           Container(
             constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.72),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                maxWidth:
+                    MediaQuery.of(context).size.width * 0.72),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: isMe ? AppTheme.navy : AppTheme.surface,
               borderRadius: BorderRadius.circular(16).copyWith(
-                bottomRight: isMe ? const Radius.circular(4) : null,
-                bottomLeft: !isMe ? const Radius.circular(4) : null,
+                bottomRight:
+                    isMe ? const Radius.circular(4) : null,
+                bottomLeft:
+                    !isMe ? const Radius.circular(4) : null,
               ),
-              border: isMe ? null : Border.all(color: AppTheme.cardBorder),
+              border: isMe
+                  ? null
+                  : Border.all(color: AppTheme.cardBorder),
             ),
             child: Text(
               data['content'] as String? ?? '',
@@ -1336,9 +1773,11 @@ class _MessageBubble extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.only(top: 2, left: 8, right: 8),
+            padding:
+                const EdgeInsets.only(top: 2, left: 8, right: 8),
             child: Text(DateFormat('h:mm a').format(createdAt),
-                style: const TextStyle(fontSize: 10, color: AppTheme.textHint)),
+                style: const TextStyle(
+                    fontSize: 10, color: AppTheme.textHint)),
           ),
         ],
       ),
@@ -1364,8 +1803,10 @@ class _PollMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final question = data['question'] as String? ?? '';
-    final options = List<String>.from(data['options'] as List? ?? []);
-    final votes = Map<String, dynamic>.from(data['votes'] as Map? ?? {});
+    final options =
+        List<String>.from(data['options'] as List? ?? []);
+    final votes =
+        Map<String, dynamic>.from(data['votes'] as Map? ?? {});
     final myVote = votes[user.uid] as int?;
     final totalVotes = votes.length;
 
@@ -1382,7 +1823,8 @@ class _PollMessage extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.poll_outlined, size: 16, color: AppTheme.navy),
+              const Icon(Icons.poll_outlined,
+                  size: 16, color: AppTheme.navy),
               const SizedBox(width: 6),
               const Text('Poll',
                   style: TextStyle(
@@ -1405,7 +1847,8 @@ class _PollMessage extends StatelessWidget {
             final opt = entry.value;
             final voteCount =
                 votes.values.where((v) => v == idx).length;
-            final pct = totalVotes > 0 ? voteCount / totalVotes : 0.0;
+            final pct =
+                totalVotes > 0 ? voteCount / totalVotes : 0.0;
             final isMyVote = myVote == idx;
             return GestureDetector(
               onTap: () => _vote(idx, votes),
@@ -1431,7 +1874,8 @@ class _PollMessage extends StatelessWidget {
                         widthFactor: pct,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: AppTheme.navy.withValues(alpha: 0.15),
+                            color: AppTheme.navy
+                                .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(7),
                           ),
                         ),
@@ -1439,13 +1883,15 @@ class _PollMessage extends StatelessWidget {
                     ),
                     Positioned.fill(
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10),
                         child: Row(
                           children: [
                             if (isMyVote)
                               const Icon(Icons.check_circle,
                                   size: 14, color: AppTheme.navy),
-                            if (isMyVote) const SizedBox(width: 4),
+                            if (isMyVote)
+                              const SizedBox(width: 4),
                             Expanded(
                               child: Text(opt,
                                   style: TextStyle(
@@ -1453,11 +1899,13 @@ class _PollMessage extends StatelessWidget {
                                       fontWeight: isMyVote
                                           ? FontWeight.w700
                                           : FontWeight.normal,
-                                      color: AppTheme.textPrimary)),
+                                      color:
+                                          AppTheme.textPrimary)),
                             ),
                             Text('${(pct * 100).toInt()}%',
                                 style: const TextStyle(
-                                    fontSize: 12, color: AppTheme.textHint)),
+                                    fontSize: 12,
+                                    color: AppTheme.textHint)),
                           ],
                         ),
                       ),
@@ -1472,14 +1920,16 @@ class _PollMessage extends StatelessWidget {
     );
   }
 
-  Future<void> _vote(int optionIdx, Map<String, dynamic> currentVotes) async {
+  Future<void> _vote(
+      int optionIdx, Map<String, dynamic> currentVotes) async {
     final ref = db
         .collection('chatRooms')
         .doc(roomId)
         .collection('messages')
         .doc(msgId);
     if (currentVotes[user.uid] == optionIdx) {
-      await ref.update({'votes.${user.uid}': FieldValue.delete()});
+      await ref.update(
+          {'votes.${user.uid}': FieldValue.delete()});
     } else {
       await ref.update({'votes.${user.uid}': optionIdx});
     }
@@ -1512,7 +1962,8 @@ class _PollCreator extends StatelessWidget {
           Row(
             children: [
               const Text('Create Poll',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 14)),
               const Spacer(),
               IconButton(
                   icon: const Icon(Icons.close, size: 18),
@@ -1543,7 +1994,9 @@ class _PollCreator extends StatelessWidget {
                 label: const Text('Add option'),
               ),
               const Spacer(),
-              ElevatedButton(onPressed: onSend, child: const Text('Send Poll')),
+              ElevatedButton(
+                  onPressed: onSend,
+                  child: const Text('Send Poll')),
             ],
           ),
         ],
@@ -1579,8 +2032,8 @@ class _InputBar extends StatelessWidget {
                 decoration: InputDecoration(
                   hintText: 'Type a message…',
                   isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
                   filled: true,
                   fillColor: AppTheme.background,
                   border: OutlineInputBorder(
@@ -1598,8 +2051,10 @@ class _InputBar extends StatelessWidget {
                 ? const Padding(
                     padding: EdgeInsets.all(10),
                     child: SizedBox(
-                        width: 22, height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2)))
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2)))
                 : IconButton(
                     onPressed: onSend,
                     icon: const Icon(Icons.send_rounded),

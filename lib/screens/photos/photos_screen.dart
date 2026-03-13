@@ -1,6 +1,7 @@
 // lib/screens/photos/photos_screen.dart
-// Photo albums: create albums, upload photos (web+mobile), folder icons,
-// comments, reactions (like/heart/pray), title/description
+// Photos: collapsible albums section at top + social-media style photo feed below
+// Album creation, folder icons, upload (web+mobile via file_picker),
+// comments, reactions (❤️ 👍 🙏), title/description
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -23,6 +24,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
   final _db = FirebaseFirestore.instance;
   final _storage = FirebaseStorage.instance;
   bool _uploading = false;
+  bool _albumsExpanded = true; // collapsible
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +33,7 @@ class _PhotosScreenState extends State<PhotosScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Photo Albums'),
+        title: const Text('Photos'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () => Navigator.pop(context),
@@ -45,99 +47,245 @@ class _PhotosScreenState extends State<PhotosScreen> {
             ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _db.collection('albums').orderBy('createdAt', descending: true).snapshots(),
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            // No index needed – use in-memory sort fallback
-            return _buildAlbumGrid(context, user, []);
-          }
-          final docs = snap.data?.docs ?? [];
-          return _buildAlbumGrid(context, user, docs);
-        },
+      body: CustomScrollView(
+        slivers: [
+          // ── Albums section (collapsible) ──────────────────────
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Albums header with toggle
+                InkWell(
+                  onTap: () =>
+                      setState(() => _albumsExpanded = !_albumsExpanded),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    color: AppTheme.surface,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.photo_album_outlined,
+                            size: 18, color: AppTheme.navy),
+                        const SizedBox(width: 8),
+                        const Text('Albums',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                                color: AppTheme.textPrimary)),
+                        const Spacer(),
+                        if (!user.isStudent)
+                          TextButton.icon(
+                            onPressed: () =>
+                                _showCreateAlbumDialog(context, user),
+                            icon: const Icon(Icons.add, size: 14),
+                            label: const Text('New',
+                                style: TextStyle(fontSize: 12)),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.navy,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8),
+                              tapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        Icon(
+                          _albumsExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          color: AppTheme.textHint,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_albumsExpanded) _buildAlbumsArea(context, user),
+                const Divider(height: 1),
+              ],
+            ),
+          ),
+          // ── Photo feed header ──────────────────────────────────
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 12),
+              color: AppTheme.surface,
+              child: Row(
+                children: [
+                  const Icon(Icons.dynamic_feed_outlined,
+                      size: 18, color: AppTheme.photosColor),
+                  const SizedBox(width: 8),
+                  const Text('All Photos',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15)),
+                  const Spacer(),
+                  if (!user.isStudent)
+                    TextButton.icon(
+                      onPressed: _uploading
+                          ? null
+                          : () => _uploadToDefault(context, user),
+                      icon: _uploading
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2))
+                          : const Icon(Icons.add_a_photo, size: 14),
+                      label: const Text('Upload',
+                          style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.photosColor,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          // ── Social feed: stream of all photos ─────────────────
+          StreamBuilder<QuerySnapshot>(
+            stream: _db.collection('photos').snapshots(),
+            builder: (ctx, snap) {
+              final docs = snap.data?.docs ?? [];
+              final sorted = [...docs];
+              sorted.sort((a, b) {
+                final aT = (a.data() as Map)['createdAt'];
+                final bT = (b.data() as Map)['createdAt'];
+                if (aT == null) return 1;
+                if (bT == null) return -1;
+                return (bT as dynamic).millisecondsSinceEpoch
+                    .compareTo((aT as dynamic).millisecondsSinceEpoch);
+              });
+
+              if (sorted.isEmpty) {
+                return SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 200,
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.photo_library_outlined,
+                              size: 48, color: AppTheme.textHint),
+                          const SizedBox(height: 12),
+                          const Text('No photos yet',
+                              style: TextStyle(
+                                  color: AppTheme.textSecondary)),
+                          if (!user.isStudent) ...[
+                            const SizedBox(height: 8),
+                            ElevatedButton.icon(
+                              onPressed: () =>
+                                  _uploadToDefault(context, user),
+                              icon: const Icon(Icons.add_a_photo),
+                              label: const Text('Upload Photo'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      AppTheme.photosColor),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) {
+                    final d = sorted[i].data() as Map<String, dynamic>;
+                    return _SocialPhotoCard(
+                      photoId: sorted[i].id,
+                      data: d,
+                      user: user,
+                      db: _db,
+                    );
+                  },
+                  childCount: sorted.length,
+                ),
+              );
+            },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        ],
       ),
       floatingActionButton: !user.isStudent
-          ? FloatingActionButton.extended(
+          ? FloatingActionButton(
               onPressed: _uploading
                   ? null
                   : () => _uploadToDefault(context, user),
               backgroundColor: AppTheme.photosColor,
-              icon: _uploading
+              child: _uploading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 22,
+                      height: 22,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.add_a_photo),
-              label: const Text('Upload Photo'),
             )
           : null,
     );
   }
 
-  Widget _buildAlbumGrid(BuildContext context, UserModel user,
-      List<QueryDocumentSnapshot> docs) {
-    // Sort in memory
-    final sorted = [...docs];
-    sorted.sort((a, b) {
-      final aT = (a.data() as Map)['createdAt'];
-      final bT = (b.data() as Map)['createdAt'];
-      if (aT == null) return 1;
-      if (bT == null) return -1;
-      return (bT as dynamic).millisecondsSinceEpoch
-          .compareTo((aT as dynamic).millisecondsSinceEpoch);
-    });
+  // ── Albums area (horizontal scrollable row + grid) ──────────────
+  Widget _buildAlbumsArea(BuildContext context, UserModel user) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _db.collection('albums').snapshots(),
+      builder: (ctx, snap) {
+        final docs = snap.data?.docs ?? [];
+        if (snap.hasError) return const SizedBox.shrink();
+        final sorted = [...docs];
+        sorted.sort((a, b) {
+          final aT = (a.data() as Map)['createdAt'];
+          final bT = (b.data() as Map)['createdAt'];
+          if (aT == null) return 1;
+          if (bT == null) return -1;
+          return (bT as dynamic).millisecondsSinceEpoch
+              .compareTo((aT as dynamic).millisecondsSinceEpoch);
+        });
 
-    if (sorted.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.photo_library_outlined,
-                size: 64, color: AppTheme.textHint),
-            const SizedBox(height: 16),
-            const Text('No albums yet',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textSecondary)),
-            const SizedBox(height: 8),
-            const Text('Create an album to organise memories',
-                style: TextStyle(color: AppTheme.textHint)),
-            const SizedBox(height: 20),
-            if (!user.isStudent)
-              ElevatedButton.icon(
-                onPressed: () => _showCreateAlbumDialog(context, user),
-                icon: const Icon(Icons.create_new_folder_outlined),
-                label: const Text('Create Album'),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.photosColor),
-              ),
-          ],
-        ),
-      );
-    }
+        if (sorted.isEmpty) {
+          return Container(
+            height: 90,
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('No albums yet',
+                    style: TextStyle(
+                        color: AppTheme.textHint, fontSize: 13)),
+                if (!user.isStudent)
+                  TextButton(
+                    onPressed: () =>
+                        _showCreateAlbumDialog(context, user),
+                    child: const Text('Create first album'),
+                  ),
+              ],
+            ),
+          );
+        }
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: sorted.length,
-      itemBuilder: (_, i) {
-        final data = sorted[i].data() as Map<String, dynamic>;
-        return _AlbumFolderTile(
-          albumId: sorted[i].id,
-          data: data,
-          user: user,
-          db: _db,
-          storage: _storage,
+        return SizedBox(
+          height: 110,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
+            itemCount: sorted.length,
+            itemBuilder: (_, i) {
+              final data = sorted[i].data() as Map<String, dynamic>;
+              return _AlbumChip(
+                albumId: sorted[i].id,
+                data: data,
+                user: user,
+                db: _db,
+                storage: _storage,
+              );
+            },
+          ),
         );
       },
     );
@@ -198,7 +346,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2))
                   : const Text('Create'),
             ),
           ],
@@ -209,7 +358,6 @@ class _PhotosScreenState extends State<PhotosScreen> {
 
   // ── Upload to General (default) album ───────────────────────────
   Future<void> _uploadToDefault(BuildContext context, UserModel user) async {
-    // Pick file using file_picker (works on web + mobile)
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
       allowMultiple: false,
@@ -223,7 +371,6 @@ class _PhotosScreenState extends State<PhotosScreen> {
     setState(() => _uploading = true);
 
     try {
-      // Ensure "General" album exists
       String albumId;
       final existing = await _db
           .collection('albums')
@@ -244,7 +391,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
         });
         albumId = newAlbum.id;
       }
-      await _uploadBytes(context, user, albumId, bytes, file.name ?? 'photo.jpg');
+      await _uploadBytes(context, user, albumId, bytes,
+          file.name ?? 'photo.jpg');
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -255,7 +403,8 @@ class _PhotosScreenState extends State<PhotosScreen> {
     final ext = fileName.contains('.') ? fileName.split('.').last : 'jpg';
     final storageName = '${DateTime.now().millisecondsSinceEpoch}.$ext';
     final ref = _storage.ref().child('albums/$albumId/$storageName');
-    final task = await ref.putData(bytes, SettableMetadata(contentType: 'image/$ext'));
+    final task = await ref.putData(
+        bytes, SettableMetadata(contentType: 'image/$ext'));
     final url = await task.ref.getDownloadURL();
 
     await _db.collection('photos').add({
@@ -269,7 +418,6 @@ class _PhotosScreenState extends State<PhotosScreen> {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // Update album photo count and cover
     await _db.collection('albums').doc(albumId).update({
       'photoCount': FieldValue.increment(1),
       'coverUrl': url,
@@ -285,14 +433,14 @@ class _PhotosScreenState extends State<PhotosScreen> {
   }
 }
 
-// ── Album Folder Tile ──────────────────────────────────────────────
-class _AlbumFolderTile extends StatelessWidget {
+// ── Album Chip (horizontal list item) ─────────────────────────────
+class _AlbumChip extends StatelessWidget {
   final String albumId;
   final Map<String, dynamic> data;
   final UserModel user;
   final FirebaseFirestore db;
   final FirebaseStorage storage;
-  const _AlbumFolderTile({
+  const _AlbumChip({
     required this.albumId,
     required this.data,
     required this.user,
@@ -303,7 +451,6 @@ class _AlbumFolderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = data['name'] as String? ?? 'Album';
-    final desc = data['description'] as String? ?? '';
     final coverUrl = data['coverUrl'] as String?;
     final photoCount = data['photoCount'] as int? ?? 0;
 
@@ -321,71 +468,35 @@ class _AlbumFolderTile extends StatelessWidget {
         ),
       ),
       child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppTheme.cardBorder),
-          boxShadow: [
-            BoxShadow(
-                color: AppTheme.photosColor.withValues(alpha: 0.08),
-                blurRadius: 6,
-                offset: const Offset(0, 3)),
-          ],
-        ),
+        width: 80,
+        margin: const EdgeInsets.only(right: 10),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Folder image / thumbnail
-            Expanded(
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(14)),
-                child: coverUrl != null && coverUrl.isNotEmpty
-                    ? Image.network(
-                        coverUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        errorBuilder: (_, __, ___) =>
-                            _folderPlaceholder(),
-                      )
-                    : _folderPlaceholder(),
-              ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: coverUrl != null && coverUrl.isNotEmpty
+                  ? Image.network(
+                      coverUrl,
+                      width: 70,
+                      height: 70,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          _folderPlaceholder(),
+                    )
+                  : _folderPlaceholder(),
             ),
-            // Info
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  if (desc.isNotEmpty)
-                    Text(desc,
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.textHint),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.photo_outlined,
-                          size: 12,
-                          color: AppTheme.textHint),
-                      const SizedBox(width: 3),
-                      Text('$photoCount photo${photoCount != 1 ? 's' : ''}',
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: AppTheme.textHint)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(height: 4),
+            Text(name,
+                style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center),
+            Text('$photoCount',
+                style: const TextStyle(
+                    fontSize: 9, color: AppTheme.textHint)),
           ],
         ),
       ),
@@ -394,11 +505,239 @@ class _AlbumFolderTile extends StatelessWidget {
 
   Widget _folderPlaceholder() {
     return Container(
-      color: AppTheme.photosColor.withValues(alpha: 0.08),
-      child: const Center(
-        child: Icon(Icons.photo_album_outlined,
-            size: 48, color: AppTheme.photosColor),
+      width: 70,
+      height: 70,
+      decoration: BoxDecoration(
+        color: AppTheme.photosColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
       ),
+      child: const Icon(Icons.photo_album_outlined,
+          size: 32, color: AppTheme.photosColor),
+    );
+  }
+}
+
+// ── Social Photo Card ──────────────────────────────────────────────
+class _SocialPhotoCard extends StatelessWidget {
+  final String photoId;
+  final Map<String, dynamic> data;
+  final UserModel user;
+  final FirebaseFirestore db;
+  const _SocialPhotoCard({
+    required this.photoId,
+    required this.data,
+    required this.user,
+    required this.db,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final url = data['url'] as String? ?? '';
+    final uploaderName = data['uploaderName'] as String? ?? '';
+    final caption = data['caption'] as String? ?? '';
+    final reactions = Map<String, dynamic>.from(
+        data['reactions'] as Map? ?? {});
+    final heartList =
+        List<String>.from(reactions['heart'] as List? ?? []);
+    final thumbList =
+        List<String>.from(reactions['thumb'] as List? ?? []);
+    final prayList =
+        List<String>.from(reactions['pray'] as List? ?? []);
+    final commentCount = data['commentCount'] as int? ?? 0;
+    final createdAt = data['createdAt'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(
+            (data['createdAt'] as dynamic).millisecondsSinceEpoch)
+        : DateTime.now();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor:
+                      AppTheme.photosColor.withValues(alpha: 0.1),
+                  child: Text(
+                    uploaderName.isNotEmpty
+                        ? uploaderName[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                        color: AppTheme.photosColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(uploaderName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13)),
+                      Text(
+                        _timeAgo(createdAt),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textHint),
+                      ),
+                    ],
+                  ),
+                ),
+                if (user.isAdmin || data['uploadedBy'] == user.uid)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        size: 18, color: AppTheme.textHint),
+                    onPressed: () async {
+                      await db
+                          .collection('photos')
+                          .doc(photoId)
+                          .delete();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Photo deleted'),
+                            duration: Duration(seconds: 2)),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+          // Photo
+          GestureDetector(
+            onDoubleTap: () => _toggleReaction('heart',
+                heartList.contains(user.uid)),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => _PhotoDetailScreen(
+                    photoId: photoId, data: data, user: user, db: db),
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.zero,
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: 280,
+                loadingBuilder: (_, child, progress) =>
+                    progress == null
+                        ? child
+                        : Container(
+                            height: 280,
+                            color: AppTheme.surfaceVariant,
+                            child: const Center(
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2)),
+                          ),
+                errorBuilder: (_, __, ___) => Container(
+                  height: 200,
+                  color: AppTheme.surfaceVariant,
+                  child: const Icon(Icons.broken_image,
+                      size: 48, color: AppTheme.textHint),
+                ),
+              ),
+            ),
+          ),
+          // Caption
+          if (caption.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Text(caption,
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          // Actions row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+            child: Row(
+              children: [
+                _ReactionBtn(
+                  emoji: '❤️',
+                  count: heartList.length,
+                  active: heartList.contains(user.uid),
+                  onTap: () => _toggleReaction(
+                      'heart', heartList.contains(user.uid)),
+                ),
+                const SizedBox(width: 8),
+                _ReactionBtn(
+                  emoji: '👍',
+                  count: thumbList.length,
+                  active: thumbList.contains(user.uid),
+                  onTap: () => _toggleReaction(
+                      'thumb', thumbList.contains(user.uid)),
+                ),
+                const SizedBox(width: 8),
+                _ReactionBtn(
+                  emoji: '🙏',
+                  count: prayList.length,
+                  active: prayList.contains(user.uid),
+                  onTap: () => _toggleReaction(
+                      'pray', prayList.contains(user.uid)),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => _openComments(context),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.chat_bubble_outline,
+                          size: 18,
+                          color: AppTheme.textSecondary),
+                      const SizedBox(width: 4),
+                      Text('$commentCount',
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('MMM d').format(dt);
+  }
+
+  void _toggleReaction(String type, bool hasIt) {
+    final ref = db.collection('photos').doc(photoId);
+    if (hasIt) {
+      ref.update({
+        'reactions.$type': FieldValue.arrayRemove([user.uid]),
+      });
+    } else {
+      ref.update({
+        'reactions.$type': FieldValue.arrayUnion([user.uid]),
+      });
+    }
+  }
+
+  void _openComments(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _PhotoCommentsSheet(
+          photoId: photoId, user: user, db: db),
     );
   }
 }
@@ -443,7 +782,6 @@ class _AlbumDetailScreenState extends State<_AlbumDetailScreen> {
             .snapshots(),
         builder: (ctx, snap) {
           final docs = snap.data?.docs ?? [];
-          // Sort in memory
           final sorted = [...docs];
           sorted.sort((a, b) {
             final aT = (a.data() as Map)['createdAt'];
@@ -463,7 +801,8 @@ class _AlbumDetailScreenState extends State<_AlbumDetailScreen> {
                       size: 64, color: AppTheme.textHint),
                   const SizedBox(height: 12),
                   const Text('No photos yet',
-                      style: TextStyle(color: AppTheme.textSecondary)),
+                      style:
+                          TextStyle(color: AppTheme.textSecondary)),
                   const SizedBox(height: 16),
                   if (!widget.user.isStudent)
                     ElevatedButton.icon(
@@ -577,7 +916,7 @@ class _AlbumDetailScreenState extends State<_AlbumDetailScreen> {
   }
 }
 
-// ── Photo Tile ────────────────────────────────────────────────────
+// ── Photo Tile (grid) ─────────────────────────────────────────────
 class _PhotoTile extends StatelessWidget {
   final String photoId;
   final Map<String, dynamic> data;
@@ -595,8 +934,7 @@ class _PhotoTile extends StatelessWidget {
     final url = data['url'] as String? ?? '';
     final reactions = Map<String, dynamic>.from(
         data['reactions'] as Map? ?? {});
-    final heartCount =
-        (reactions['heart'] as List? ?? []).length;
+    final heartCount = (reactions['heart'] as List? ?? []).length;
     final isHearted =
         (reactions['heart'] as List? ?? []).contains(user.uid);
 
@@ -608,14 +946,15 @@ class _PhotoTile extends StatelessWidget {
           Image.network(
             url,
             fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) => progress == null
-                ? child
-                : Container(
-                    color: AppTheme.surfaceVariant,
-                    child: const Center(
-                        child: CircularProgressIndicator(
-                            strokeWidth: 1)),
-                  ),
+            loadingBuilder: (_, child, progress) =>
+                progress == null
+                    ? child
+                    : Container(
+                        color: AppTheme.surfaceVariant,
+                        child: const Center(
+                            child: CircularProgressIndicator(
+                                strokeWidth: 1)),
+                      ),
             errorBuilder: (_, __, ___) => Container(
               color: AppTheme.surfaceVariant,
               child: const Icon(Icons.broken_image,
@@ -642,8 +981,7 @@ class _PhotoTile extends StatelessWidget {
                           ? Icons.favorite
                           : Icons.favorite_border,
                       size: 12,
-                      color:
-                          isHearted ? Colors.red : Colors.white,
+                      color: isHearted ? Colors.red : Colors.white,
                     ),
                     const SizedBox(width: 3),
                     Text('$heartCount',
@@ -703,12 +1041,12 @@ class _PhotoDetailScreen extends StatelessWidget {
     final caption = data['caption'] as String? ?? '';
     final reactions = Map<String, dynamic>.from(
         data['reactions'] as Map? ?? {});
-    final heartList = List<String>.from(
-        reactions['heart'] as List? ?? []);
-    final prayList = List<String>.from(
-        reactions['pray'] as List? ?? []);
-    final thumbList = List<String>.from(
-        reactions['thumb'] as List? ?? []);
+    final heartList =
+        List<String>.from(reactions['heart'] as List? ?? []);
+    final prayList =
+        List<String>.from(reactions['pray'] as List? ?? []);
+    final thumbList =
+        List<String>.from(reactions['thumb'] as List? ?? []);
     final commentCount = data['commentCount'] as int? ?? 0;
     final createdAt = data['createdAt'] != null
         ? DateTime.fromMillisecondsSinceEpoch(
@@ -721,11 +1059,13 @@ class _PhotoDetailScreen extends StatelessWidget {
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(uploaderName,
-            style: const TextStyle(color: Colors.white, fontSize: 15)),
+            style:
+                const TextStyle(color: Colors.white, fontSize: 15)),
         actions: [
           if (user.isAdmin || data['uploadedBy'] == user.uid)
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.white),
+              icon: const Icon(Icons.delete_outline,
+                  color: Colors.white),
               onPressed: () {
                 db.collection('photos').doc(photoId).delete();
                 Navigator.pop(context);
@@ -752,7 +1092,6 @@ class _PhotoDetailScreen extends StatelessWidget {
                     child: Text(caption,
                         style: const TextStyle(fontSize: 14)),
                   ),
-                // Reaction row
                 Row(
                   children: [
                     _ReactionBtn(
@@ -760,7 +1099,8 @@ class _PhotoDetailScreen extends StatelessWidget {
                       count: heartList.length,
                       active: heartList.contains(user.uid),
                       onTap: () => _toggleReaction(
-                          context, 'heart', heartList.contains(user.uid)),
+                          context, 'heart',
+                          heartList.contains(user.uid)),
                     ),
                     const SizedBox(width: 12),
                     _ReactionBtn(
@@ -768,7 +1108,8 @@ class _PhotoDetailScreen extends StatelessWidget {
                       count: thumbList.length,
                       active: thumbList.contains(user.uid),
                       onTap: () => _toggleReaction(
-                          context, 'thumb', thumbList.contains(user.uid)),
+                          context, 'thumb',
+                          thumbList.contains(user.uid)),
                     ),
                     const SizedBox(width: 12),
                     _ReactionBtn(
@@ -776,7 +1117,8 @@ class _PhotoDetailScreen extends StatelessWidget {
                       count: prayList.length,
                       active: prayList.contains(user.uid),
                       onTap: () => _toggleReaction(
-                          context, 'pray', prayList.contains(user.uid)),
+                          context, 'pray',
+                          prayList.contains(user.uid)),
                     ),
                     const Spacer(),
                     GestureDetector(
@@ -788,14 +1130,16 @@ class _PhotoDetailScreen extends StatelessWidget {
                               color: AppTheme.textSecondary),
                           const SizedBox(width: 4),
                           Text('$commentCount',
-                              style: const TextStyle(fontSize: 13)),
+                              style:
+                                  const TextStyle(fontSize: 13)),
                         ],
                       ),
                     ),
                     const SizedBox(width: 12),
                     Text(DateFormat('MMM d, y').format(createdAt),
                         style: const TextStyle(
-                            color: AppTheme.textHint, fontSize: 11)),
+                            color: AppTheme.textHint,
+                            fontSize: 11)),
                   ],
                 ),
               ],
@@ -806,7 +1150,8 @@ class _PhotoDetailScreen extends StatelessWidget {
     );
   }
 
-  void _toggleReaction(BuildContext context, String type, bool hasIt) {
+  void _toggleReaction(
+      BuildContext context, String type, bool hasIt) {
     final ref = db.collection('photos').doc(photoId);
     if (hasIt) {
       ref.update({
@@ -824,8 +1169,8 @@ class _PhotoDetailScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _PhotoCommentsSheet(
-          photoId: photoId, user: user, db: db),
+      builder: (_) =>
+          _PhotoCommentsSheet(photoId: photoId, user: user, db: db),
     );
   }
 }
@@ -847,7 +1192,8 @@ class _ReactionBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: active
               ? AppTheme.navy.withValues(alpha: 0.1)
@@ -866,7 +1212,8 @@ class _ReactionBtn extends StatelessWidget {
               const SizedBox(width: 4),
               Text('$count',
                   style: const TextStyle(
-                      fontSize: 12, color: AppTheme.textSecondary)),
+                      fontSize: 12,
+                      color: AppTheme.textSecondary)),
             ],
           ],
         ),
@@ -907,7 +1254,8 @@ class _PhotoCommentsSheetState extends State<_PhotoCommentsSheet> {
       builder: (_, sc) => Container(
         decoration: const BoxDecoration(
           color: AppTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
           children: [
@@ -936,16 +1284,16 @@ class _PhotoCommentsSheetState extends State<_PhotoCommentsSheet> {
                   if (docs.isEmpty) {
                     return const Center(
                         child: Text('No comments yet',
-                            style:
-                                TextStyle(color: AppTheme.textHint)));
+                            style: TextStyle(
+                                color: AppTheme.textHint)));
                   }
                   return ListView.builder(
                     controller: sc,
                     padding: const EdgeInsets.all(16),
                     itemCount: docs.length,
                     itemBuilder: (_, i) {
-                      final d =
-                          docs[i].data() as Map<String, dynamic>;
+                      final d = docs[i].data()
+                          as Map<String, dynamic>;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Row(
@@ -954,8 +1302,8 @@ class _PhotoCommentsSheetState extends State<_PhotoCommentsSheet> {
                           children: [
                             CircleAvatar(
                               radius: 14,
-                              backgroundColor: AppTheme.navy
-                                  .withValues(alpha: 0.1),
+                              backgroundColor:
+                                  AppTheme.navy.withValues(alpha: 0.1),
                               child: Text(
                                   (d['authorName'] as String? ??
                                           '?')[0]
@@ -974,10 +1322,12 @@ class _PhotoCommentsSheetState extends State<_PhotoCommentsSheet> {
                                       d['authorName'] as String? ??
                                           '',
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                          fontWeight:
+                                              FontWeight.w600,
                                           fontSize: 12)),
                                   Text(
-                                      d['content'] as String? ?? '',
+                                      d['content'] as String? ??
+                                          '',
                                       style: const TextStyle(
                                           fontSize: 13)),
                                 ],
@@ -1011,7 +1361,8 @@ class _PhotoCommentsSheetState extends State<_PhotoCommentsSheet> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.send, color: AppTheme.navy),
+                    icon: const Icon(Icons.send,
+                        color: AppTheme.navy),
                     onPressed: _sending ? null : _send,
                   ),
                 ],

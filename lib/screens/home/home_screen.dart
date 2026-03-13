@@ -1,9 +1,12 @@
-// lib/screens/home/home_screen.dart  — Style 3: Minimalist Navy & Gold
+// lib/screens/home/home_screen.dart  — with notification badges + co-op week label
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
+import '../../services/notification_prefs_service.dart';
 import '../assignments/assignments_screen.dart';
 import '../messages/messages_screen.dart';
 import '../calendar/calendar_screen.dart';
@@ -14,13 +17,52 @@ import '../feeds/feeds_screen.dart';
 import '../settings/settings_screen.dart';
 import '../admin/admin_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _db = FirebaseFirestore.instance;
+  Map<String, bool> _notifPrefs = {};
+  String? _coopWeekLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+    _loadCoopWeekLabel();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await NotificationPrefsService.loadPrefs();
+    if (mounted) setState(() => _notifPrefs = prefs);
+  }
+
+  Future<void> _loadCoopWeekLabel() async {
+    try {
+      final weekKey = _currentWeekKey();
+      final doc = await _db.collection('coopCalendar').doc(weekKey).get();
+      if (mounted && doc.exists) {
+        setState(() =>
+            _coopWeekLabel = doc.data()?['label'] as String?);
+      }
+    } catch (_) {}
+  }
+
+  String _currentWeekKey() {
+    final now = DateTime.now();
+    // Monday-based week key
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    return DateFormat('yyyy-MM-dd').format(monday);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final auth  = context.watch<AuthProvider>();
-    final user  = auth.currentUser;
+    final auth = context.watch<AuthProvider>();
+    final user = auth.currentUser;
     if (user == null) return const SizedBox.shrink();
 
     return Scaffold(
@@ -70,7 +112,6 @@ class HomeScreen extends StatelessWidget {
           child: SafeArea(
             child: Stack(
               children: [
-                // Faint circular watermark
                 Positioned(
                   right: -30, top: -30,
                   child: Opacity(
@@ -97,13 +138,11 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Content
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // ACHC Logo badge
                       _buildLogoMark(),
                       const SizedBox(width: 14),
                       Expanded(
@@ -128,12 +167,30 @@ class HomeScreen extends StatelessWidget {
                                 letterSpacing: 0.4,
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            // Co-op week label
+                            if (_coopWeekLabel != null) ...[
+                              const SizedBox(height: 3),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.gold.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  _coopWeekLabel!,
+                                  style: const TextStyle(
+                                      color: AppTheme.goldLight,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ] else
+                              const SizedBox(height: 6),
                             _buildRolePill(user),
                           ],
                         ),
                       ),
-                      // Avatar + settings
                       Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -254,6 +311,14 @@ class HomeScreen extends StatelessWidget {
                 Text(user.displayName,
                   style: const TextStyle(color: AppTheme.textPrimary,
                     fontWeight: FontWeight.w700, fontSize: 15, fontFamily: 'Georgia')),
+                if (_coopWeekLabel != null) ...[
+                  const SizedBox(height: 3),
+                  Text(_coopWeekLabel!,
+                    style: const TextStyle(
+                        color: AppTheme.navy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+                ],
               ],
             ),
           ),
@@ -281,7 +346,21 @@ class HomeScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        AppTheme.sectionHeader('Quick Access'),
+        Row(
+          children: [
+            AppTheme.sectionHeader('Quick Access'),
+            const Spacer(),
+            // Notification settings button
+            if (!user.isStudent)
+              TextButton.icon(
+                onPressed: () => _showNotifSettings(context),
+                icon: const Icon(Icons.notifications_outlined, size: 16),
+                label: const Text('Badges', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+              ),
+          ],
+        ),
         GridView.count(
           crossAxisCount: user.isStudent ? 1 : 3,
           shrinkWrap: true,
@@ -289,7 +368,12 @@ class HomeScreen extends StatelessWidget {
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
           childAspectRatio: user.isStudent ? 3.5 : 0.88,
-          children: features.map((f) => _FeatureTile(item: f)).toList(),
+          children: features.map((f) => _FeatureTile(
+            item: f,
+            badgeEnabled: _notifPrefs[f.notifKey] ?? false,
+            db: _db,
+            userUid: user.uid,
+          )).toList(),
         ),
       ],
     );
@@ -299,26 +383,39 @@ class HomeScreen extends StatelessWidget {
     if (user.isStudent) {
       return [
         _FeatureItem('Assignments', Icons.assignment_outlined,
-          AppTheme.assignmentsColor, const AssignmentsScreen()),
+          AppTheme.assignmentsColor, const AssignmentsScreen(),
+          notifKey: NotificationPrefsService.keyAssignments,
+          badgeQuery: (db, uid) => db.collection('assignments')
+              .where('assignedUids', arrayContains: uid)
+              .where('status', isEqualTo: 'pending')),
         _FeatureItem('Prayer', Icons.volunteer_activism_outlined,
-          AppTheme.prayerColor, const FeedsScreen(initialTab: 2)),
+          AppTheme.prayerColor, const FeedsScreen(initialTab: 2),
+          notifKey: NotificationPrefsService.keyFeedPrayer),
       ];
     }
     return [
       _FeatureItem('Assignments', Icons.assignment_outlined,
-        AppTheme.assignmentsColor, const AssignmentsScreen()),
-      _FeatureItem('Messages',    Icons.chat_bubble_outline,
-        AppTheme.messagesColor,   const MessagesScreen()),
-      _FeatureItem('Calendar',    Icons.calendar_today_outlined,
-        AppTheme.calendarColor,   const CalendarScreen()),
-      _FeatureItem('Photos',      Icons.photo_library_outlined,
-        AppTheme.photosColor,     const PhotosScreen()),
-      _FeatureItem('Check-In',    Icons.how_to_reg_outlined,
-        AppTheme.checkInColor,    const CheckInScreen()),
-      _FeatureItem('Files',       Icons.folder_outlined,
-        AppTheme.filesColor,      const FilesScreen()),
-      _FeatureItem('Feeds',       Icons.dynamic_feed_outlined,
-        AppTheme.feedsColor,      const FeedsScreen()),
+        AppTheme.assignmentsColor, const AssignmentsScreen(),
+        notifKey: NotificationPrefsService.keyAssignments),
+      _FeatureItem('Messages', Icons.chat_bubble_outline,
+        AppTheme.messagesColor, const MessagesScreen(),
+        notifKey: NotificationPrefsService.keyMessages,
+        badgeQuery: (db, uid) => db.collection('chatRooms')
+            .where('members', arrayContains: uid)),
+      _FeatureItem('Calendar', Icons.calendar_today_outlined,
+        AppTheme.calendarColor, const CalendarScreen(),
+        notifKey: NotificationPrefsService.keyCalendar),
+      _FeatureItem('Photos', Icons.photo_library_outlined,
+        AppTheme.photosColor, const PhotosScreen(),
+        notifKey: NotificationPrefsService.keyPhotos),
+      _FeatureItem('Check-In', Icons.how_to_reg_outlined,
+        AppTheme.checkInColor, const CheckInScreen()),
+      _FeatureItem('Files', Icons.folder_outlined,
+        AppTheme.filesColor, const FilesScreen(),
+        notifKey: NotificationPrefsService.keyFiles),
+      _FeatureItem('Feeds', Icons.dynamic_feed_outlined,
+        AppTheme.feedsColor, const FeedsScreen(),
+        notifKey: NotificationPrefsService.keyFeedAnnouncements),
     ];
   }
 
@@ -387,50 +484,298 @@ class HomeScreen extends StatelessWidget {
     if (h < 17) return 'Good afternoon';
     return 'Good evening';
   }
+
+  // ── Notification Settings Sheet ────────────────────────────────
+  void _showNotifSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _NotifSettingsSheet(
+        prefs: Map.from(_notifPrefs),
+        onChanged: (key, value) async {
+          await NotificationPrefsService.setPref(key, value);
+          await _loadPrefs();
+        },
+      ),
+    );
+  }
 }
 
-// ── Feature Tile Widget ───────────────────────────────────────
+// ── Feature Tile with Badge ───────────────────────────────────────
 class _FeatureItem {
   final String label;
   final IconData icon;
   final Color color;
   final Widget screen;
-  _FeatureItem(this.label, this.icon, this.color, this.screen);
+  final String? notifKey;
+  final Query Function(FirebaseFirestore, String)? badgeQuery;
+  _FeatureItem(this.label, this.icon, this.color, this.screen,
+      {this.notifKey, this.badgeQuery});
 }
 
 class _FeatureTile extends StatelessWidget {
   final _FeatureItem item;
-  const _FeatureTile({required this.item});
+  final bool badgeEnabled;
+  final FirebaseFirestore db;
+  final String userUid;
+  const _FeatureTile({
+    required this.item,
+    required this.badgeEnabled,
+    required this.db,
+    required this.userUid,
+  });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => Navigator.push(context,
         MaterialPageRoute(builder: (_) => item.screen)),
-      child: Container(
-        decoration: AppTheme.featureTileDecoration(item.color),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            decoration: AppTheme.featureTileDecoration(item.color),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: item.color.withValues(alpha: 0.08),
+                    border: Border.all(
+                      color: item.color.withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Icon(item.icon, color: item.color, size: 24),
+                ),
+                const SizedBox(height: 8),
+                Text(item.label,
+                  style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w600,
+                    color: item.color, letterSpacing: 0.2),
+                  textAlign: TextAlign.center),
+              ],
+            ),
+          ),
+          // Badge counter
+          if (badgeEnabled && item.notifKey != null)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: _BadgeCounter(
+                notifKey: item.notifKey!,
+                badgeQuery: item.badgeQuery,
+                db: db,
+                userUid: userUid,
+                tileColor: item.color,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BadgeCounter extends StatelessWidget {
+  final String notifKey;
+  final Query Function(FirebaseFirestore, String)? badgeQuery;
+  final FirebaseFirestore db;
+  final String userUid;
+  final Color tileColor;
+  const _BadgeCounter({
+    required this.notifKey,
+    this.badgeQuery,
+    required this.db,
+    required this.userUid,
+    required this.tileColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (badgeQuery == null) {
+      // Generic dot badge for sections without specific query
+      return Container(
+        width: 10, height: 10,
+        decoration: BoxDecoration(
+          color: AppTheme.error,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+      );
+    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: badgeQuery!(db, userUid).snapshots(),
+      builder: (_, snap) {
+        int count = 0;
+        if (notifKey == NotificationPrefsService.keyMessages) {
+          // For messages: count rooms with unread
+          count = (snap.data?.docs ?? []).where((d) {
+            final unread = (d.data() as Map)['unread_$userUid'] as int? ?? 0;
+            return unread > 0;
+          }).length;
+        } else {
+          count = snap.data?.docs.length ?? 0;
+        }
+        if (count == 0) return const SizedBox.shrink();
+        return Container(
+          constraints: const BoxConstraints(minWidth: 18),
+          height: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.error,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: Colors.white, width: 1.5),
+          ),
+          child: Center(
+            child: Text(
+              count > 99 ? '99+' : '$count',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Notification Settings Sheet ────────────────────────────────────
+class _NotifSettingsSheet extends StatefulWidget {
+  final Map<String, bool> prefs;
+  final Future<void> Function(String key, bool value) onChanged;
+  const _NotifSettingsSheet({required this.prefs, required this.onChanged});
+
+  @override
+  State<_NotifSettingsSheet> createState() => _NotifSettingsSheetState();
+}
+
+class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
+  late Map<String, bool> _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefs = Map.from(widget.prefs);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      _NotifItem('Assignments', Icons.assignment_outlined,
+          AppTheme.assignmentsColor, NotificationPrefsService.keyAssignments),
+      _NotifItem('Messages', Icons.chat_bubble_outline,
+          AppTheme.messagesColor, NotificationPrefsService.keyMessages),
+      _NotifItem('Calendar Events', Icons.calendar_today_outlined,
+          AppTheme.calendarColor, NotificationPrefsService.keyCalendar),
+      _NotifItem('Files', Icons.folder_outlined,
+          AppTheme.filesColor, NotificationPrefsService.keyFiles),
+      _NotifItem('Announcements (always on)', Icons.campaign_outlined,
+          AppTheme.feedsColor, NotificationPrefsService.keyFeedAnnouncements,
+          locked: true),
+      _NotifItem('Social Feed', Icons.people_outline,
+          AppTheme.photosColor, NotificationPrefsService.keyFeedSocial),
+      _NotifItem('Prayer Feed', Icons.volunteer_activism_outlined,
+          AppTheme.prayerColor, NotificationPrefsService.keyFeedPrayer),
+      _NotifItem('Photos', Icons.photo_library_outlined,
+          AppTheme.photosColor, NotificationPrefsService.keyPhotos),
+    ];
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      maxChildSize: 0.9,
+      minChildSize: 0.4,
+      builder: (_, ctrl) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 48, height: 48,
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: item.color.withValues(alpha: 0.08),
-                border: Border.all(
-                  color: item.color.withValues(alpha: 0.25), width: 1),
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications_outlined, size: 22,
+                      color: AppTheme.navy),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('Notification Badge Settings',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'Georgia')),
+                  ),
+                ],
               ),
-              child: Icon(item.icon, color: item.color, size: 24),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Choose which sections show a badge counter on the home screen.',
+                style: TextStyle(
+                    fontSize: 12, color: AppTheme.textSecondary),
+              ),
             ),
             const SizedBox(height: 8),
-            Text(item.label,
-              style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600,
-                color: item.color, letterSpacing: 0.2),
-              textAlign: TextAlign.center),
+            const Divider(),
+            Expanded(
+              child: ListView.builder(
+                controller: ctrl,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: items.length,
+                itemBuilder: (_, i) {
+                  final item = items[i];
+                  final isOn = _prefs[item.key] ?? false;
+                  return ListTile(
+                    leading: Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: item.color.withValues(alpha: 0.1),
+                      ),
+                      child: Icon(item.icon, color: item.color, size: 18),
+                    ),
+                    title: Text(item.label,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w500)),
+                    trailing: Switch(
+                      value: isOn,
+                      onChanged: item.locked
+                          ? null
+                          : (v) async {
+                              setState(() => _prefs[item.key] = v);
+                              await widget.onChanged(item.key, v);
+                            },
+                      activeTrackColor: item.color,
+                      activeColor: item.color,
+                    ),
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+class _NotifItem {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final String key;
+  final bool locked;
+  const _NotifItem(this.label, this.icon, this.color, this.key,
+      {this.locked = false});
 }
