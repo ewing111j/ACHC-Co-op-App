@@ -91,6 +91,13 @@ class _FeedsScreenState extends State<FeedsScreen>
 
   void _setCount(FeedType type, int count) {
     if (!mounted) return;
+    // Only rebuild if the count actually changed
+    final changed = switch (type) {
+      FeedType.announcement => count != _announceCount,
+      FeedType.social       => count != _socialCount,
+      FeedType.prayer       => count != _prayerCount,
+    };
+    if (!changed) return;
     setState(() {
       switch (type) {
         case FeedType.announcement:
@@ -248,7 +255,7 @@ class _TabLabel extends StatelessWidget {
 }
 
 // ── Per-Tab Feed List ─────────────────────────────────────────────
-class _FeedTab extends StatelessWidget {
+class _FeedTab extends StatefulWidget {
   final FeedType type;
   final UserModel user;
   final FirebaseFirestore db;
@@ -263,11 +270,28 @@ class _FeedTab extends StatelessWidget {
   });
 
   @override
+  State<_FeedTab> createState() => _FeedTabState();
+}
+
+class _FeedTabState extends State<_FeedTab> {
+  // Track last reported count to avoid infinite setState loops
+  int _lastReportedCount = -1;
+
+  void _reportCount(int count) {
+    if (count == _lastReportedCount) return; // no change — skip
+    _lastReportedCount = count;
+    // Schedule after build to avoid setState-during-build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onCountChanged(count);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: db
+      stream: widget.db
           .collection('feeds')
-          .where('type', isEqualTo: type.name)
+          .where('type', isEqualTo: widget.type.name)
           .snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
@@ -301,21 +325,20 @@ class _FeedTab extends StatelessWidget {
           return bMs.compareTo(aMs);
         });
 
-        // Calculate unread count and notify parent
-        if (lastSeenTs > 0) {
+        // Calculate unread count — only notify parent when value changes
+        if (widget.lastSeenTs > 0) {
           final unread = sorted.where((d) {
             final ts = (d.data() as Map)['createdAt'];
             if (ts == null) return false;
-            return (ts as Timestamp).millisecondsSinceEpoch > lastSeenTs;
+            return (ts as Timestamp).millisecondsSinceEpoch > widget.lastSeenTs;
           }).length;
-          // Schedule callback after build
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            onCountChanged(unread);
-          });
+          _reportCount(unread);
+        } else {
+          _reportCount(0);
         }
 
         if (sorted.isEmpty) {
-          return _EmptyFeed(type: type);
+          return _EmptyFeed(type: widget.type);
         }
 
         return ListView.builder(
@@ -324,7 +347,7 @@ class _FeedTab extends StatelessWidget {
           itemBuilder: (ctx, i) {
             final data = sorted[i].data() as Map<String, dynamic>;
             final post = FeedModel.fromMap(data, sorted[i].id);
-            return _PostCard(post: post, user: user, db: db);
+            return _PostCard(post: post, user: widget.user, db: widget.db);
           },
         );
       },
