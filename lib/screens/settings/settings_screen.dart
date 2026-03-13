@@ -1,8 +1,10 @@
 // lib/screens/settings/settings_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../models/user_model.dart';
 import '../moodle/moodle_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -109,24 +111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icons.family_restroom,
                 AppTheme.navy,
                 [
-                  ...auth.students.map((kid) => ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppTheme.gold
-                              .withValues(alpha: 0.15),
-                          child: Text(
-                            kid.displayName.isNotEmpty
-                                ? kid.displayName[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                                color: AppTheme.gold,
-                                fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        title: Text(kid.displayName),
-                        subtitle: const Text('Student'),
-                        trailing: const Icon(
-                            Icons.person_outline, size: 20),
-                      )),
+                  ...auth.students.map((kid) => _StudentTile(kid: kid)),
                   ListTile(
                     leading: Container(
                       width: 40,
@@ -400,6 +385,146 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style:
                 ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
             child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Student Tile with classes listed below name ───────────────────
+class _StudentTile extends StatefulWidget {
+  final UserModel kid;
+  const _StudentTile({required this.kid});
+
+  @override
+  State<_StudentTile> createState() => _StudentTileState();
+}
+
+class _StudentTileState extends State<_StudentTile> {
+  List<String> _classNames = [];
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadClasses();
+  }
+
+  Future<void> _loadClasses() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('groups')
+          .where('type', isEqualTo: 'class')
+          .where('memberUids', arrayContains: widget.kid.uid)
+          .get();
+      final names = snap.docs
+          .map((d) => d.data()['name'] as String? ?? '')
+          .where((n) => n.isNotEmpty)
+          .toList()
+        ..sort();
+      if (mounted) {
+        setState(() {
+          _classNames = names;
+          _loaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Avatar
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: AppTheme.gold.withValues(alpha: 0.15),
+              child: Text(
+                widget.kid.displayName.isNotEmpty
+                    ? widget.kid.displayName[0].toUpperCase()
+                    : '?',
+                style: const TextStyle(
+                    color: AppTheme.gold, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+          // Name + role label + classes
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        widget.kid.displayName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.navy.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('Student',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: AppTheme.navy,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  // Classes row — wraps to multiple lines if needed
+                  if (!_loaded)
+                    const SizedBox(
+                        height: 14,
+                        width: 14,
+                        child: CircularProgressIndicator(strokeWidth: 1.5))
+                  else if (_classNames.isEmpty)
+                    const Text('No classes assigned',
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textHint))
+                  else
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 4,
+                      children: _classNames.map((cn) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.gold.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: AppTheme.gold.withValues(alpha: 0.35)),
+                        ),
+                        child: Text(cn,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.navy,
+                                fontWeight: FontWeight.w500)),
+                      )).toList(),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 14, right: 8),
+            child: Icon(Icons.person_outline, size: 18,
+                color: AppTheme.textHint),
           ),
         ],
       ),

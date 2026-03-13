@@ -1,9 +1,10 @@
 // lib/screens/checkin/checkin_screen.dart
 // Check-In tab: self + students; Attendance tab: per-class breakdown
 // Attendance permissions:
-//   - Admin: can check in students for any class
+//   - Admin: can check in students for ANY class
 //   - Mentor/Second: can check in only for their own assigned classes
-//   - Parent: self check-in + their own students only
+//   - Parent: can check in their own students (kidUids) for any class
+//             AND can check in any student for classes they mentor/second
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -327,7 +328,6 @@ class _CheckInCardState extends State<_CheckInCard> {
             'Out ${_checkOutTime != null ? fmt.format(_checkOutTime!) : ""}';
         break;
       case _CIState.none:
-      default:
         borderColor = AppTheme.cardBorder;
         iconBg = AppTheme.surfaceVariant;
         iconColor = AppTheme.textSecondary;
@@ -443,32 +443,13 @@ class _AttendanceTabState extends State<_AttendanceTab> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
+      // All roles see ALL classes
       stream: widget.db
           .collection('groups')
           .where('type', isEqualTo: 'class')
           .snapshots(),
       builder: (ctx, groupSnap) {
-        final allGroups = groupSnap.data?.docs ?? [];
-
-        // Filter groups based on role:
-        // - Admin sees all classes
-        // - Mentor/Second sees only their assigned classes
-        // - Others see all (for viewing purposes)
-        final groups = widget.user.isAdmin
-            ? allGroups
-            : allGroups.where((g) {
-                final data = g.data() as Map<String, dynamic>;
-                final mentors = List<String>.from(
-                    data['mentorUids'] as List? ?? []);
-                final seconds = List<String>.from(
-                    data['secondUids'] as List? ?? []);
-                // Mentors/seconds can interact with their classes
-                final isAssigned =
-                    mentors.contains(widget.user.uid) ||
-                        seconds.contains(widget.user.uid);
-                // Parents can see all for viewing
-                return widget.user.isParent ? true : isAssigned;
-              }).toList();
+        final groups = groupSnap.data?.docs ?? [];
 
         return StreamBuilder<QuerySnapshot>(
           stream: widget.db
@@ -480,10 +461,15 @@ class _AttendanceTabState extends State<_AttendanceTab> {
               return const Center(child: CircularProgressIndicator());
             }
             final checkIns = ciSnap.data?.docs ?? [];
-            final checkedInUids = checkIns
-                .map((d) =>
-                    (d.data() as Map)['uid'] as String? ?? '')
-                .toSet();
+
+            // Build a map uid → checkin doc for easy lookup
+            final checkinByUid = <String, Map<String, dynamic>>{};
+            for (final doc in checkIns) {
+              final data = doc.data() as Map<String, dynamic>;
+              final uid = data['uid'] as String? ?? '';
+              if (uid.isNotEmpty) checkinByUid[uid] = data;
+            }
+            final checkedInUids = checkinByUid.keys.toSet();
 
             if (groups.isEmpty) {
               return _SimpleTodayList(
@@ -533,19 +519,17 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                       final seconds = List<String>.from(
                           gData['secondUids'] as List? ?? []);
 
-                      // Determine if this user can check in for this class
-                      final canCheckIn = widget.user.isAdmin ||
+                      // Permission: can check in ANY student?
+                      // Admin → yes for all classes
+                      // Mentor/Second of this class → yes for this class
+                      // Parent → yes for their own kids (kidUids),
+                      //          also yes for any student if they mentor/second here
+                      final isAssignedToClass =
                           mentors.contains(widget.user.uid) ||
-                          seconds.contains(widget.user.uid);
+                              seconds.contains(widget.user.uid);
+                      final canCheckInAll = widget.user.isAdmin ||
+                          isAssignedToClass;
 
-                      final classCheckedIn = members
-                          .where(
-                              (uid) => checkedInUids.contains(uid))
-                          .toSet();
-                      final classAbsent = members
-                          .where((uid) =>
-                              !checkedInUids.contains(uid))
-                          .toList();
                       final mentorIn = mentors
                           .any((m) => checkedInUids.contains(m));
                       final secondIn = seconds
@@ -554,18 +538,17 @@ class _AttendanceTabState extends State<_AttendanceTab> {
                       return _ClassTodayCard(
                         groupId: groups[i].id,
                         className: gName,
-                        totalStudents: members.length,
-                        checkedInCount: classCheckedIn.length,
-                        absentUids: classAbsent,
+                        memberUids: members,
+                        mentors: mentors,
+                        seconds: seconds,
                         mentorIn: mentorIn,
                         secondIn: secondIn,
-                        hasMentor: mentors.isNotEmpty,
-                        hasSecond: seconds.isNotEmpty,
                         db: widget.db,
                         user: widget.user,
-                        canCheckIn: canCheckIn,
+                        canCheckInAll: canCheckInAll,
                         todayKey: _todayKey,
                         checkedInUids: checkedInUids,
+                        checkinByUid: checkinByUid,
                       );
                     },
                   ),
@@ -625,33 +608,32 @@ class _SimpleTodayList extends StatelessWidget {
 class _ClassTodayCard extends StatefulWidget {
   final String groupId;
   final String className;
-  final int totalStudents;
-  final int checkedInCount;
-  final List<String> absentUids;
+  final List<String> memberUids;
+  final List<String> mentors;
+  final List<String> seconds;
   final bool mentorIn;
   final bool secondIn;
-  final bool hasMentor;
-  final bool hasSecond;
   final FirebaseFirestore db;
   final UserModel user;
-  final bool canCheckIn;
+  final bool canCheckInAll;   // admin or assigned mentor/second
   final String todayKey;
   final Set<String> checkedInUids;
+  final Map<String, Map<String, dynamic>> checkinByUid;
+
   const _ClassTodayCard({
     required this.groupId,
     required this.className,
-    required this.totalStudents,
-    required this.checkedInCount,
-    required this.absentUids,
+    required this.memberUids,
+    required this.mentors,
+    required this.seconds,
     required this.mentorIn,
     required this.secondIn,
-    required this.hasMentor,
-    required this.hasSecond,
     required this.db,
     required this.user,
-    required this.canCheckIn,
+    required this.canCheckInAll,
     required this.todayKey,
     required this.checkedInUids,
+    required this.checkinByUid,
   });
 
   @override
@@ -661,11 +643,14 @@ class _ClassTodayCard extends StatefulWidget {
 class _ClassTodayCardState extends State<_ClassTodayCard> {
   bool _expanded = false;
 
+  int get _checkedInCount =>
+      widget.memberUids.where((u) => widget.checkedInUids.contains(u)).length;
+
   @override
   Widget build(BuildContext context) {
-    final pct = widget.totalStudents > 0
-        ? widget.checkedInCount / widget.totalStudents
-        : 0.0;
+    final total = widget.memberUids.length;
+    final checkedIn = _checkedInCount;
+    final pct = total > 0 ? checkedIn / total : 0.0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -695,8 +680,7 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15)),
                       ),
-                      // Permission badge
-                      if (widget.canCheckIn)
+                      if (widget.canCheckInAll)
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 7, vertical: 2),
@@ -735,19 +719,19 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
                   Row(
                     children: [
                       Text(
-                        '${widget.checkedInCount}/${widget.totalStudents} checked in',
+                        '$checkedIn/$total checked in',
                         style: const TextStyle(
                             fontSize: 12,
                             color: AppTheme.textSecondary),
                       ),
                       const Spacer(),
-                      if (widget.hasMentor) ...[
+                      if (widget.mentors.isNotEmpty) ...[
                         _Badge(
                             label: 'Mentor',
                             ok: widget.mentorIn),
                         const SizedBox(width: 6),
                       ],
-                      if (widget.hasSecond)
+                      if (widget.seconds.isNotEmpty)
                         _Badge(label: '2nd', ok: widget.secondIn),
                     ],
                   ),
@@ -757,104 +741,64 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
           ),
           if (_expanded) ...[
             const Divider(height: 1),
-            // Absent list
-            widget.absentUids.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Icon(Icons.check_circle,
-                            size: 16, color: AppTheme.success),
-                        SizedBox(width: 6),
-                        Text('Everyone checked in!',
-                            style: TextStyle(
-                                fontSize: 13,
-                                color: AppTheme.success)),
-                      ],
-                    ),
-                  )
-                : Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              'Absent (${widget.absentUids.length}):',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.error),
-                            ),
-                            const Spacer(),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        ...widget.absentUids.map(
-                          (uid) => FutureBuilder<DocumentSnapshot>(
-                            future: widget.db
-                                .collection('users')
-                                .doc(uid)
-                                .get(),
-                            builder: (_, snap) {
-                              final name =
-                                  snap.data?.exists == true
-                                      ? (snap.data!.data()
-                                              as Map)[
-                                              'displayName']
-                                          as String? ??
-                                          uid
-                                      : uid;
-                              return Padding(
-                                padding: const EdgeInsets.only(
-                                    bottom: 6),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.close,
-                                        size: 14,
-                                        color: AppTheme.error),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(name,
-                                          style: const TextStyle(
-                                              fontSize: 13,
-                                              color: AppTheme
-                                                  .textSecondary)),
-                                    ),
-                                    // Check-in button for absent student
-                                    if (widget.canCheckIn)
-                                      TextButton(
-                                        onPressed: () =>
-                                            _checkInStudent(
-                                                uid, name),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor:
-                                              AppTheme.success,
-                                          padding: const EdgeInsets
-                                              .symmetric(
-                                                  horizontal: 8,
-                                                  vertical: 2),
-                                          minimumSize: Size.zero,
-                                          tapTargetSize:
-                                              MaterialTapTargetSize
-                                                  .shrinkWrap,
-                                        ),
-                                        child: const Text(
-                                            'Check In',
-                                            style: TextStyle(
-                                                fontSize: 11)),
-                                      ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (widget.memberUids.isEmpty)
+                    const Text('No members in this class',
+                        style: TextStyle(
+                            fontSize: 13, color: AppTheme.textHint))
+                  else
+                    // Show ALL students — checked in and absent
+                    ...widget.memberUids.map((uid) {
+                      final isCheckedIn =
+                          widget.checkedInUids.contains(uid);
+                      final ci = widget.checkinByUid[uid];
+                      final checkInTime = ci != null &&
+                              ci['timestamp'] != null
+                          ? DateFormat('h:mm a').format(
+                              DateTime.fromMillisecondsSinceEpoch(
+                                  (ci['timestamp'] as Timestamp)
+                                      .millisecondsSinceEpoch))
+                          : null;
+
+                      // Can this user check in THIS specific student?
+                      final isMyKid =
+                          widget.user.kidUids.contains(uid);
+                      final canCheckInThisStudent = widget.canCheckInAll ||
+                          (widget.user.isParent && isMyKid);
+
+                      return FutureBuilder<DocumentSnapshot>(
+                        future: widget.db
+                            .collection('users')
+                            .doc(uid)
+                            .get(),
+                        builder: (_, snap) {
+                          final name = snap.data?.exists == true
+                              ? (snap.data!.data()
+                                      as Map)['displayName']
+                                  as String? ??
+                                  uid
+                              : uid;
+
+                          return _StudentAttendanceRow(
+                            uid: uid,
+                            name: name,
+                            isCheckedIn: isCheckedIn,
+                            checkInTime: checkInTime,
+                            canCheckIn: canCheckInThisStudent &&
+                                !isCheckedIn,
+                            onCheckIn: () =>
+                                _checkInStudent(uid, name),
+                          );
+                        },
+                      );
+                    }),
+                ],
+              ),
+            ),
           ],
         ],
       ),
@@ -863,7 +807,6 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
 
   Future<void> _checkInStudent(String uid, String name) async {
     try {
-      // Check if already checked in (concurrent update)
       final existing = await widget.db
           .collection('checkins')
           .where('uid', isEqualTo: uid)
@@ -908,6 +851,72 @@ class _ClassTodayCardState extends State<_ClassTodayCard> {
         );
       }
     }
+  }
+}
+
+// ── Single student row showing checked-in / absent status ─────────
+class _StudentAttendanceRow extends StatelessWidget {
+  final String uid;
+  final String name;
+  final bool isCheckedIn;
+  final String? checkInTime;
+  final bool canCheckIn;
+  final VoidCallback onCheckIn;
+
+  const _StudentAttendanceRow({
+    required this.uid,
+    required this.name,
+    required this.isCheckedIn,
+    required this.checkInTime,
+    required this.canCheckIn,
+    required this.onCheckIn,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isCheckedIn ? AppTheme.success : AppTheme.error;
+    final icon = isCheckedIn ? Icons.check_circle_outline : Icons.cancel_outlined;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: isCheckedIn
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary)),
+                if (isCheckedIn && checkInTime != null)
+                  Text('Checked in at $checkInTime',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppTheme.textHint)),
+              ],
+            ),
+          ),
+          if (canCheckIn)
+            TextButton(
+              onPressed: onCheckIn,
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.success,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child:
+                  const Text('Check In', style: TextStyle(fontSize: 11)),
+            ),
+        ],
+      ),
+    );
   }
 }
 

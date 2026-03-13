@@ -1,8 +1,9 @@
-// lib/screens/home/home_screen.dart  — with notification badges + co-op week label
+// lib/screens/home/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
@@ -28,12 +29,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final _db = FirebaseFirestore.instance;
   Map<String, bool> _notifPrefs = {};
   String? _coopWeekLabel;
+  // Track "last seen" timestamps per section to show badge when new content arrives
+  Map<String, int> _lastSeenTs = {};
 
   @override
   void initState() {
     super.initState();
     _loadPrefs();
     _loadCoopWeekLabel();
+    _loadLastSeenTs();
   }
 
   Future<void> _loadPrefs() async {
@@ -46,15 +50,37 @@ class _HomeScreenState extends State<HomeScreen> {
       final weekKey = _currentWeekKey();
       final doc = await _db.collection('coopCalendar').doc(weekKey).get();
       if (mounted && doc.exists) {
-        setState(() =>
-            _coopWeekLabel = doc.data()?['label'] as String?);
+        setState(() => _coopWeekLabel = doc.data()?['label'] as String?);
       }
     } catch (_) {}
   }
 
+  Future<void> _loadLastSeenTs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = [
+      'lastseen_assignments', 'lastseen_messages', 'lastseen_calendar',
+      'lastseen_photos', 'lastseen_files', 'lastseen_feeds',
+    ];
+    final map = <String, int>{};
+    for (final k in keys) {
+      map[k] = prefs.getInt(k) ?? 0;
+    }
+    if (mounted) setState(() => _lastSeenTs = map);
+  }
+
+  Future<void> _markSeen(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    await prefs.setInt('lastseen_$key', ts);
+    if (mounted) setState(() => _lastSeenTs['lastseen_$key'] = ts);
+  }
+
+  Future<void> _clearBadge(String key) async {
+    await _markSeen(key);
+  }
+
   String _currentWeekKey() {
     final now = DateTime.now();
-    // Monday-based week key
     final monday = now.subtract(Duration(days: now.weekday - 1));
     return DateFormat('yyyy-MM-dd').format(monday);
   }
@@ -167,7 +193,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 letterSpacing: 0.4,
                               ),
                             ),
-                            // Co-op week label
                             if (_coopWeekLabel != null) ...[
                               const SizedBox(height: 3),
                               Container(
@@ -350,7 +375,6 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             AppTheme.sectionHeader('Quick Access'),
             const Spacer(),
-            // Notification settings button
             if (!user.isStudent)
               TextButton.icon(
                 onPressed: () => _showNotifSettings(context),
@@ -361,21 +385,96 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           ],
         ),
-        GridView.count(
-          crossAxisCount: user.isStudent ? 1 : 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-          childAspectRatio: user.isStudent ? 3.5 : 0.88,
-          children: features.map((f) => _FeatureTile(
-            item: f,
-            badgeEnabled: _notifPrefs[f.notifKey] ?? false,
-            db: _db,
-            userUid: user.uid,
-          )).toList(),
-        ),
+        const SizedBox(height: 8),
+        // ── For students: vertical list ──
+        if (user.isStudent)
+          Column(
+            children: features.map((f) => _buildStudentRow(context, f, user)).toList(),
+          )
+        else
+          // ── For parents/admins: 3-column grid ──
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 0.88,
+            children: features.map((f) => _FeatureTile(
+              item: f,
+              badgeEnabled: _notifPrefs[f.notifKey] ?? false,
+              db: _db,
+              userUid: user.uid,
+              lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
+              onTap: () {
+                _markSeen(f.seenKey);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => f.screen));
+              },
+              onClearBadge: () => _clearBadge(f.seenKey),
+            )).toList(),
+          ),
       ],
+    );
+  }
+
+  Widget _buildStudentRow(BuildContext context, _FeatureItem f, UserModel user) {
+    return GestureDetector(
+      onTap: () {
+        _markSeen(f.seenKey);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => f.screen));
+      },
+      onLongPress: () => _showClearBadgeMenu(context, f.label, f.seenKey),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: AppTheme.featureTileDecoration(f.color),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: f.color.withValues(alpha: 0.1),
+                      border: Border.all(
+                        color: f.color.withValues(alpha: 0.25), width: 1),
+                    ),
+                    child: Icon(f.icon, color: f.color, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Text(f.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: f.color,
+                    )),
+                  const Spacer(),
+                  Icon(Icons.chevron_right,
+                    color: f.color.withValues(alpha: 0.5), size: 18),
+                ],
+              ),
+            ),
+            // Badge overlaid at top-right corner
+            if (_notifPrefs[f.notifKey] ?? false)
+              Positioned(
+                top: -6,
+                right: -6,
+                child: _BadgeCounter(
+                  notifKey: f.notifKey ?? '',
+                  badgeQuery: f.badgeQuery,
+                  db: _db,
+                  userUid: user.uid,
+                  tileColor: f.color,
+                  lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -385,37 +484,49 @@ class _HomeScreenState extends State<HomeScreen> {
         _FeatureItem('Assignments', Icons.assignment_outlined,
           AppTheme.assignmentsColor, const AssignmentsScreen(),
           notifKey: NotificationPrefsService.keyAssignments,
+          seenKey: 'assignments',
           badgeQuery: (db, uid) => db.collection('assignments')
               .where('assignedUids', arrayContains: uid)
               .where('status', isEqualTo: 'pending')),
         _FeatureItem('Prayer', Icons.volunteer_activism_outlined,
           AppTheme.prayerColor, const FeedsScreen(initialTab: 2),
-          notifKey: NotificationPrefsService.keyFeedPrayer),
+          notifKey: NotificationPrefsService.keyFeedPrayer,
+          seenKey: 'feeds'),
       ];
     }
     return [
       _FeatureItem('Assignments', Icons.assignment_outlined,
         AppTheme.assignmentsColor, const AssignmentsScreen(),
-        notifKey: NotificationPrefsService.keyAssignments),
+        notifKey: NotificationPrefsService.keyAssignments,
+        seenKey: 'assignments',
+        badgeQuery: (db, uid) => db.collection('assignments')
+            .where('assignedUids', arrayContains: uid)
+            .where('status', isEqualTo: 'pending')),
       _FeatureItem('Messages', Icons.chat_bubble_outline,
         AppTheme.messagesColor, const MessagesScreen(),
         notifKey: NotificationPrefsService.keyMessages,
+        seenKey: 'messages',
         badgeQuery: (db, uid) => db.collection('chatRooms')
             .where('members', arrayContains: uid)),
       _FeatureItem('Calendar', Icons.calendar_today_outlined,
         AppTheme.calendarColor, const CalendarScreen(),
-        notifKey: NotificationPrefsService.keyCalendar),
+        notifKey: NotificationPrefsService.keyCalendar,
+        seenKey: 'calendar'),
       _FeatureItem('Photos', Icons.photo_library_outlined,
         AppTheme.photosColor, const PhotosScreen(),
-        notifKey: NotificationPrefsService.keyPhotos),
+        notifKey: NotificationPrefsService.keyPhotos,
+        seenKey: 'photos'),
       _FeatureItem('Check-In', Icons.how_to_reg_outlined,
-        AppTheme.checkInColor, const CheckInScreen()),
+        AppTheme.checkInColor, const CheckInScreen(),
+        seenKey: 'checkin'),
       _FeatureItem('Files', Icons.folder_outlined,
         AppTheme.filesColor, const FilesScreen(),
-        notifKey: NotificationPrefsService.keyFiles),
+        notifKey: NotificationPrefsService.keyFiles,
+        seenKey: 'files'),
       _FeatureItem('Feeds', Icons.dynamic_feed_outlined,
         AppTheme.feedsColor, const FeedsScreen(),
-        notifKey: NotificationPrefsService.keyFeedAnnouncements),
+        notifKey: NotificationPrefsService.keyFeedAnnouncements,
+        seenKey: 'feeds'),
     ];
   }
 
@@ -500,40 +611,120 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  void _showClearBadgeMenu(BuildContext context, String label, String seenKey) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.notifications_off_outlined,
+                  color: AppTheme.navy),
+              title: Text('Clear badge for $label'),
+              subtitle: const Text('Mark all as seen'),
+              onTap: () {
+                Navigator.pop(context);
+                _clearBadge(seenKey);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-// ── Feature Tile with Badge ───────────────────────────────────────
+// ── Feature Item Model ─────────────────────────────────────────────
 class _FeatureItem {
   final String label;
   final IconData icon;
   final Color color;
   final Widget screen;
   final String? notifKey;
+  final String seenKey;
   final Query Function(FirebaseFirestore, String)? badgeQuery;
   _FeatureItem(this.label, this.icon, this.color, this.screen,
-      {this.notifKey, this.badgeQuery});
+      {this.notifKey, required this.seenKey, this.badgeQuery});
 }
 
+// ── Feature Tile (3-col grid for parents/admins) ──────────────────
 class _FeatureTile extends StatelessWidget {
   final _FeatureItem item;
   final bool badgeEnabled;
   final FirebaseFirestore db;
   final String userUid;
+  final int lastSeenTs;
+  final VoidCallback onTap;
+  final VoidCallback onClearBadge;
+
   const _FeatureTile({
     required this.item,
     required this.badgeEnabled,
     required this.db,
     required this.userUid,
+    required this.lastSeenTs,
+    required this.onTap,
+    required this.onClearBadge,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.push(context,
-        MaterialPageRoute(builder: (_) => item.screen)),
+      onTap: onTap,
+      onLongPress: () {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: Colors.transparent,
+          builder: (_) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.notifications_off_outlined,
+                      color: AppTheme.navy),
+                  title: Text('Clear badge for ${item.label}'),
+                  subtitle: const Text('Mark all as seen'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onClearBadge();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          // Tile body — same original style
           Container(
             decoration: AppTheme.featureTileDecoration(item.color),
             child: Column(
@@ -558,17 +749,18 @@ class _FeatureTile extends StatelessWidget {
               ],
             ),
           ),
-          // Badge counter
+          // Badge overlaid at the top-right corner, partially outside tile
           if (badgeEnabled && item.notifKey != null)
             Positioned(
-              top: 4,
-              right: 4,
+              top: -6,
+              right: -6,
               child: _BadgeCounter(
                 notifKey: item.notifKey!,
                 badgeQuery: item.badgeQuery,
                 db: db,
                 userUid: userUid,
                 tileColor: item.color,
+                lastSeenTs: lastSeenTs,
               ),
             ),
         ],
@@ -577,26 +769,31 @@ class _FeatureTile extends StatelessWidget {
   }
 }
 
+// ── Badge Counter ─────────────────────────────────────────────────
 class _BadgeCounter extends StatelessWidget {
   final String notifKey;
   final Query Function(FirebaseFirestore, String)? badgeQuery;
   final FirebaseFirestore db;
   final String userUid;
   final Color tileColor;
+  final int lastSeenTs;
+
   const _BadgeCounter({
     required this.notifKey,
     this.badgeQuery,
     required this.db,
     required this.userUid,
     required this.tileColor,
+    required this.lastSeenTs,
   });
 
   @override
   Widget build(BuildContext context) {
     if (badgeQuery == null) {
-      // Generic dot badge for sections without specific query
+      // Dot badge for sections without live query (calendar, files, etc.)
+      // Show if we've never seen it or it was recently updated
       return Container(
-        width: 10, height: 10,
+        width: 12, height: 12,
         decoration: BoxDecoration(
           color: AppTheme.error,
           shape: BoxShape.circle,
@@ -604,18 +801,33 @@ class _BadgeCounter extends StatelessWidget {
         ),
       );
     }
+
     return StreamBuilder<QuerySnapshot>(
       stream: badgeQuery!(db, userUid).snapshots(),
       builder: (_, snap) {
         int count = 0;
         if (notifKey == NotificationPrefsService.keyMessages) {
-          // For messages: count rooms with unread
           count = (snap.data?.docs ?? []).where((d) {
-            final unread = (d.data() as Map)['unread_$userUid'] as int? ?? 0;
+            final data = d.data() as Map;
+            // Count rooms with unread messages newer than last-seen timestamp
+            final unread = data['unread_$userUid'] as int? ?? 0;
             return unread > 0;
           }).length;
         } else {
-          count = snap.data?.docs.length ?? 0;
+          // Count items newer than lastSeenTs
+          count = (snap.data?.docs ?? []).where((d) {
+            final data = d.data() as Map;
+            final ts = data['createdAt'] ?? data['timestamp'];
+            if (ts == null) return false;
+            final ms = ts is Timestamp
+                ? ts.millisecondsSinceEpoch
+                : ts as int;
+            return ms > lastSeenTs;
+          }).length;
+          // If no createdAt field, fallback to total count
+          if (count == 0 && lastSeenTs == 0) {
+            count = snap.data?.docs.length ?? 0;
+          }
         }
         if (count == 0) return const SizedBox.shrink();
         return Container(
@@ -721,9 +933,8 @@ class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: Text(
-                'Choose which sections show a badge counter on the home screen.',
-                style: TextStyle(
-                    fontSize: 12, color: AppTheme.textSecondary),
+                'Choose which sections show a badge counter on the home screen. Long-press any tile to clear its badge.',
+                style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
               ),
             ),
             const SizedBox(height: 8),
@@ -757,7 +968,7 @@ class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
                               await widget.onChanged(item.key, v);
                             },
                       activeTrackColor: item.color,
-                      activeColor: item.color,
+                      activeThumbColor: item.color,
                     ),
                   );
                 },
