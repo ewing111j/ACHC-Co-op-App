@@ -1,13 +1,13 @@
 // lib/screens/calendar/calendar_screen.dart
+// Shared schedule, admin editable, event notifications
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/event_model.dart';
-import '../../services/firestore_service.dart';
 import '../../utils/app_theme.dart';
-import 'package:uuid/uuid.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -17,26 +17,15 @@ class CalendarScreen extends StatefulWidget {
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
-  final _firestoreService = FirestoreService();
-  final _uuid = const Uuid();
+  final _db = FirebaseFirestore.instance;
   DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedDay = DateTime.now();
-  }
-
-  List<EventModel> _getEventsForDay(
-      List<EventModel> events, DateTime day) {
-    return events.where((e) => isSameDay(e.startDate, day)).toList();
-  }
+  DateTime _selectedDay = DateTime.now();
+  CalendarFormat _calFormat = CalendarFormat.month;
+  Map<DateTime, List<EventModel>> _events = {};
 
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().currentUser!;
-    final familyId = user.familyId ?? '';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -46,329 +35,329 @@ class _CalendarScreenState extends State<CalendarScreen> {
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(_calFormat == CalendarFormat.month
+                ? Icons.view_week
+                : Icons.calendar_view_month),
+            onPressed: () => setState(() => _calFormat =
+                _calFormat == CalendarFormat.month
+                    ? CalendarFormat.week
+                    : CalendarFormat.month),
+          ),
+        ],
       ),
-      floatingActionButton: (user.isParent || user.isAdmin)
-          ? FloatingActionButton(
-              onPressed: () =>
-                  _showAddEventDialog(context, familyId, user.uid),
-              backgroundColor: AppTheme.calendarColor,
-              child: const Icon(Icons.add),
-            )
-          : null,
-      body: StreamBuilder<List<EventModel>>(
-        stream: _firestoreService.streamEvents(familyId),
-        builder: (context, snapshot) {
-          final events = snapshot.data ?? [];
-          final selectedEvents = _selectedDay != null
-              ? _getEventsForDay(events, _selectedDay!)
-              : <EventModel>[];
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _db.collection('events').orderBy('startDate').snapshots(),
+        builder: (ctx, snap) {
+          if (snap.hasData) {
+            _events = {};
+            for (final doc in snap.data!.docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              final ev = EventModel.fromMap(data, doc.id);
+              final key = DateTime(
+                  ev.startDate.year, ev.startDate.month, ev.startDate.day);
+              _events.putIfAbsent(key, () => []).add(ev);
+            }
+          }
+
+          final selectedEvents = _getEventsForDay(_selectedDay);
 
           return Column(
             children: [
+              // Calendar widget
               Container(
-                color: Colors.white,
+                color: AppTheme.surface,
                 child: TableCalendar<EventModel>(
                   firstDay: DateTime.utc(2020, 1, 1),
                   lastDay: DateTime.utc(2030, 12, 31),
                   focusedDay: _focusedDay,
-                  selectedDayPredicate: (day) =>
-                      isSameDay(_selectedDay, day),
-                  eventLoader: (day) => _getEventsForDay(events, day),
+                  calendarFormat: _calFormat,
+                  selectedDayPredicate: (d) => isSameDay(_selectedDay, d),
+                  eventLoader: _getEventsForDay,
+                  onDaySelected: (sel, foc) {
+                    setState(() {
+                      _selectedDay = sel;
+                      _focusedDay = foc;
+                    });
+                  },
+                  onFormatChanged: (f) => setState(() => _calFormat = f),
                   calendarStyle: CalendarStyle(
                     selectedDecoration: const BoxDecoration(
-                      color: AppTheme.calendarColor,
-                      shape: BoxShape.circle,
-                    ),
+                      color: AppTheme.navy, shape: BoxShape.circle),
                     todayDecoration: BoxDecoration(
-                      color: AppTheme.calendarColor.withValues(alpha: 0.3),
+                      color: AppTheme.gold.withValues(alpha: 0.3),
                       shape: BoxShape.circle,
                     ),
                     markerDecoration: const BoxDecoration(
-                      color: AppTheme.accent,
-                      shape: BoxShape.circle,
-                    ),
+                        color: AppTheme.gold, shape: BoxShape.circle),
+                    weekendTextStyle: const TextStyle(color: AppTheme.textSecondary),
                   ),
                   headerStyle: const HeaderStyle(
                     formatButtonVisible: false,
                     titleCentered: true,
                     titleTextStyle: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                    ),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: AppTheme.textPrimary),
                   ),
-                  onDaySelected: (selectedDay, focusedDay) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _focusedDay = focusedDay;
-                    });
-                  },
-                  onPageChanged: (focusedDay) {
-                    setState(() => _focusedDay = focusedDay);
-                  },
                 ),
               ),
-              const Divider(height: 1),
+              AppTheme.goldDivider(),
+              // Events for selected day
               Expanded(
                 child: selectedEvents.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.event_outlined,
+                            const Icon(Icons.event_outlined,
                                 size: 48, color: AppTheme.textHint),
                             const SizedBox(height: 12),
-                            const Text(
-                              'No events on this day',
-                              style: TextStyle(
+                            Text(
+                              DateFormat('MMMM d').format(_selectedDay),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
                                   color: AppTheme.textSecondary),
                             ),
+                            const SizedBox(height: 4),
+                            const Text('No events scheduled',
+                                style: TextStyle(color: AppTheme.textHint)),
                           ],
                         ),
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.all(16),
                         itemCount: selectedEvents.length,
-                        itemBuilder: (ctx, i) =>
-                            _buildEventCard(selectedEvents[i], user),
+                        itemBuilder: (_, i) =>
+                            _EventCard(event: selectedEvents[i], user: user, db: _db),
                       ),
               ),
             ],
           );
         },
       ),
+      floatingActionButton: (user.isAdmin || user.isParent)
+          ? FloatingActionButton(
+              onPressed: () => _showAddEvent(context, user),
+              backgroundColor: AppTheme.calendarColor,
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 
-  Widget _buildEventCard(EventModel event, user) {
-    final color = _hexToColor(event.color);
-    return Card(
+  List<EventModel> _getEventsForDay(DateTime day) {
+    final key = DateTime(day.year, day.month, day.day);
+    return _events[key] ?? [];
+  }
+
+  void _showAddEvent(BuildContext context, dynamic user) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddEventSheet(db: _db, user: user),
+    );
+  }
+}
+
+// ── Event Card ────────────────────────────────────────────────────
+class _EventCard extends StatelessWidget {
+  final EventModel event;
+  final dynamic user;
+  final FirebaseFirestore db;
+  const _EventCard({required this.event, required this.user, required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border(
+          left: BorderSide(color: AppTheme.calendarColor, width: 4),
+          top: BorderSide(color: AppTheme.cardBorder),
+          right: BorderSide(color: AppTheme.cardBorder),
+          bottom: BorderSide(color: AppTheme.cardBorder),
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        title: Text(event.title,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 4,
-              height: 50,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    event.title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                    ),
-                  ),
-                  if (event.description?.isNotEmpty ?? false) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      event.description!,
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13),
-                    ),
-                  ],
-                  if (event.location?.isNotEmpty ?? false) ...[
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined,
-                            size: 13, color: AppTheme.textSecondary),
-                        const SizedBox(width: 2),
-                        Text(
-                          event.location!,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            if (event.description.isNotEmpty)
+              Text(event.description,
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  maxLines: 2),
+            const SizedBox(height: 4),
+            Row(
               children: [
+                const Icon(Icons.access_time, size: 12, color: AppTheme.textHint),
+                const SizedBox(width: 4),
                 Text(
                   DateFormat('h:mm a').format(event.startDate),
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600),
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textHint),
                 ),
-                if ((user.isParent || user.isAdmin))
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline,
-                        size: 18, color: AppTheme.error),
-                    onPressed: () =>
-                        _firestoreService.deleteEvent(event.id),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
+                if (event.location != null && event.location!.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  const Icon(Icons.place_outlined, size: 12, color: AppTheme.textHint),
+                  const SizedBox(width: 4),
+                  Text(event.location!,
+                      style: const TextStyle(fontSize: 11, color: AppTheme.textHint)),
+                ],
               ],
             ),
           ],
         ),
+        trailing: (user?.isAdmin == true || user?.uid == event.createdBy)
+            ? IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    size: 18, color: AppTheme.textHint),
+                onPressed: () => db.collection('events').doc(event.id).delete(),
+              )
+            : null,
       ),
     );
   }
+}
 
-  Color _hexToColor(String hex) {
-    try {
-      return Color(int.parse(hex.replaceAll('#', '0xFF')));
-    } catch (_) {
-      return AppTheme.calendarColor;
-    }
+// ── Add Event Sheet ───────────────────────────────────────────────
+class _AddEventSheet extends StatefulWidget {
+  final FirebaseFirestore db;
+  final dynamic user;
+  const _AddEventSheet({required this.db, required this.user});
+
+  @override
+  State<_AddEventSheet> createState() => _AddEventSheetState();
+}
+
+class _AddEventSheetState extends State<_AddEventSheet> {
+  final _titleCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  final _locCtrl = TextEditingController();
+  DateTime _start = DateTime.now().add(const Duration(hours: 1));
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    _locCtrl.dispose();
+    super.dispose();
   }
 
-  void _showAddEventDialog(
-      BuildContext context, String familyId, String userId) {
-    final titleCtrl = TextEditingController();
-    final descCtrl = TextEditingController();
-    final locationCtrl = TextEditingController();
-    DateTime startDate = _selectedDay ?? DateTime.now();
-    String selectedColor = '#43A047';
-
-    final colors = {
-      'Green': '#43A047',
-      'Blue': '#1E88E5',
-      'Orange': '#FF7043',
-      'Purple': '#8E24AA',
-      'Red': '#E53935',
-      'Teal': '#00897B',
-    };
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Event'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Event Title'),
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Text('Add Event',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _titleCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Event Title *', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _descCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Description', border: OutlineInputBorder()),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _locCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Location', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  'Start: ${DateFormat('MMM d, y – h:mm a').format(_start)}',
+                  style: const TextStyle(fontSize: 14),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: descCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Description'),
-                  maxLines: 2,
+                trailing: const Icon(Icons.calendar_today, size: 18, color: AppTheme.navy),
+                onTap: () async {
+                  final p = await showDateTimePicker(context);
+                  if (p != null) setState(() => _start = p);
+                },
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.calendarColor,
+                      padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: _saving
+                      ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                      : const Text('Add Event'),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: locationCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Location'),
-                ),
-                const SizedBox(height: 12),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    DateFormat('MMM d, y – h:mm a').format(startDate),
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  leading: const Icon(Icons.schedule, size: 20),
-                  onTap: () async {
-                    final picked = await showDateTimePicker(
-                      context: ctx,
-                      initialDate: startDate,
-                    );
-                    if (picked != null) {
-                      setDialogState(() => startDate = picked);
-                    }
-                  },
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  children: colors.entries.map((e) {
-                    final color = _hexToColor(e.value);
-                    return GestureDetector(
-                      onTap: () =>
-                          setDialogState(() => selectedColor = e.value),
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                          border: selectedColor == e.value
-                              ? Border.all(
-                                  color: Colors.black, width: 2)
-                              : null,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (titleCtrl.text.isEmpty) return;
-                final event = EventModel(
-                  id: _uuid.v4(),
-                  title: titleCtrl.text.trim(),
-                  description: descCtrl.text.trim().isEmpty
-                      ? null
-                      : descCtrl.text.trim(),
-                  startDate: startDate,
-                  location: locationCtrl.text.trim().isEmpty
-                      ? null
-                      : locationCtrl.text.trim(),
-                  color: selectedColor,
-                  createdBy: userId,
-                  familyId: familyId,
-                  createdAt: DateTime.now(),
-                );
-                await _firestoreService.createEvent(event);
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.calendarColor),
-              child: const Text('Add Event'),
-            ),
-          ],
         ),
       ),
     );
   }
 
-  Future<DateTime?> showDateTimePicker({
-    required BuildContext context,
-    required DateTime initialDate,
-  }) async {
+  Future<DateTime?> showDateTimePicker(BuildContext context) async {
     final date = await showDatePicker(
       context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      initialDate: _start,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (date == null || !context.mounted) return null;
     final time = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(initialDate),
+      initialTime: TimeOfDay.fromDateTime(_start),
     );
-    if (time == null) return date;
+    if (time == null) return null;
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _save() async {
+    if (_titleCtrl.text.trim().isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      await widget.db.collection('events').add({
+        'title': _titleCtrl.text.trim(),
+        'description': _descCtrl.text.trim(),
+        'location': _locCtrl.text.trim(),
+        'startDate': Timestamp.fromDate(_start),
+        'endDate': Timestamp.fromDate(_start.add(const Duration(hours: 1))),
+        'createdBy': widget.user?.uid ?? '',
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRecurring': false,
+      });
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 }

@@ -14,6 +14,7 @@ class AssignmentModel {
   final double? maxGrade;
   final String? submissionUrl;
   final bool fromMoodle;
+  final bool isOptional;
   final String? assignedTo; // uid or 'all'
   final String familyId;
   final DateTime createdAt;
@@ -30,6 +31,7 @@ class AssignmentModel {
     this.maxGrade,
     this.submissionUrl,
     required this.fromMoodle,
+    this.isOptional = false,
     this.assignedTo,
     required this.familyId,
     required this.createdAt,
@@ -53,6 +55,7 @@ class AssignmentModel {
       dueDate: dueDate,
       status: AssignmentStatus.pending,
       fromMoodle: true,
+      isOptional: false,
       familyId: '',
       createdAt: DateTime.now(),
     );
@@ -74,6 +77,7 @@ class AssignmentModel {
       maxGrade: (map['maxGrade'] as num?)?.toDouble(),
       submissionUrl: map['submissionUrl'] as String?,
       fromMoodle: map['fromMoodle'] as bool? ?? false,
+      isOptional: map['isOptional'] as bool? ?? false,
       assignedTo: map['assignedTo'] as String?,
       familyId: map['familyId'] as String? ?? '',
       createdAt: map['createdAt'] != null
@@ -95,6 +99,7 @@ class AssignmentModel {
       'maxGrade': maxGrade,
       'submissionUrl': submissionUrl,
       'fromMoodle': fromMoodle,
+      'isOptional': isOptional,
       'assignedTo': assignedTo,
       'familyId': familyId,
       'createdAt': createdAt,

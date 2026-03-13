@@ -191,8 +191,6 @@ class FirestoreService {
           .map((d) => FeedModel.fromMap(d.data(), d.id))
           .toList();
       list.sort((a, b) {
-        if (a.isPinned && !b.isPinned) return -1;
-        if (!a.isPinned && b.isPinned) return 1;
         return b.createdAt.compareTo(a.createdAt);
       });
       return list;

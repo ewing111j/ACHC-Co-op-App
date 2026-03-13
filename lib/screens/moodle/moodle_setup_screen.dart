@@ -223,7 +223,7 @@ class _MoodleSetupScreenState extends State<MoodleSetupScreen> {
                   label: const Text('Test Connection'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(color: AppTheme.primary),
+                    side: const BorderSide(color: AppTheme.navy),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),

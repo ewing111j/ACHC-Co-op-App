@@ -3,55 +3,47 @@
 class EventModel {
   final String id;
   final String title;
-  final String? description;
-  final DateTime startDate;
-  final DateTime? endDate;
-  final bool allDay;
+  final String description;
   final String? location;
-  final String color;
+  final DateTime startDate;
+  final DateTime endDate;
   final String createdBy;
-  final String familyId;
-  final bool isPublic;
+  final bool isRecurring;
   final DateTime createdAt;
 
   const EventModel({
     required this.id,
     required this.title,
-    this.description,
-    required this.startDate,
-    this.endDate,
-    this.allDay = false,
+    required this.description,
     this.location,
-    this.color = '#2196F3',
+    required this.startDate,
+    required this.endDate,
     required this.createdBy,
-    required this.familyId,
-    this.isPublic = false,
+    this.isRecurring = false,
     required this.createdAt,
   });
 
   factory EventModel.fromMap(Map<String, dynamic> map, String id) {
+    DateTime _ts(dynamic v, DateTime fallback) {
+      if (v == null) return fallback;
+      try {
+        return DateTime.fromMillisecondsSinceEpoch(
+            (v as dynamic).millisecondsSinceEpoch as int);
+      } catch (_) {
+        return fallback;
+      }
+    }
+
     return EventModel(
       id: id,
       title: map['title'] as String? ?? '',
-      description: map['description'] as String?,
-      startDate: map['startDate'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(
-              (map['startDate'] as dynamic).millisecondsSinceEpoch)
-          : DateTime.now(),
-      endDate: map['endDate'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(
-              (map['endDate'] as dynamic).millisecondsSinceEpoch)
-          : null,
-      allDay: map['allDay'] as bool? ?? false,
+      description: map['description'] as String? ?? '',
       location: map['location'] as String?,
-      color: map['color'] as String? ?? '#2196F3',
+      startDate: _ts(map['startDate'], DateTime.now()),
+      endDate: _ts(map['endDate'], DateTime.now().add(const Duration(hours: 1))),
       createdBy: map['createdBy'] as String? ?? '',
-      familyId: map['familyId'] as String? ?? '',
-      isPublic: map['isPublic'] as bool? ?? false,
-      createdAt: map['createdAt'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(
-              (map['createdAt'] as dynamic).millisecondsSinceEpoch)
-          : DateTime.now(),
+      isRecurring: map['isRecurring'] as bool? ?? false,
+      createdAt: _ts(map['createdAt'], DateTime.now()),
     );
   }
 
@@ -59,14 +51,11 @@ class EventModel {
     return {
       'title': title,
       'description': description,
+      'location': location,
       'startDate': startDate,
       'endDate': endDate,
-      'allDay': allDay,
-      'location': location,
-      'color': color,
       'createdBy': createdBy,
-      'familyId': familyId,
-      'isPublic': isPublic,
+      'isRecurring': isRecurring,
       'createdAt': createdAt,
     };
   }

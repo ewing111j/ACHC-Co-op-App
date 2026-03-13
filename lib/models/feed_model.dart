@@ -1,92 +1,81 @@
 // lib/models/feed_model.dart
 
-enum FeedType { announcement, news, event, photo, resource }
+enum FeedType { announcement, social, prayer }
 
 class FeedModel {
   final String id;
+  final FeedType type;
   final String title;
   final String content;
-  final FeedType type;
   final String authorId;
   final String authorName;
-  final String? authorAvatar;
-  final String familyId;
-  final DateTime createdAt;
-  final List<String> likes;
+  final List<String> likedBy;
   final int commentCount;
-  final String? imageUrl;
-  final String? linkUrl;
-  final bool isPinned;
+  final List<String> pollOptions;
+  final Map<String, dynamic> pollVotes;
+  final bool inKidFeed;
+  final DateTime createdAt;
 
   const FeedModel({
     required this.id,
+    required this.type,
     required this.title,
     required this.content,
-    required this.type,
     required this.authorId,
     required this.authorName,
-    this.authorAvatar,
-    required this.familyId,
+    required this.likedBy,
+    required this.commentCount,
+    required this.pollOptions,
+    required this.pollVotes,
+    required this.inKidFeed,
     required this.createdAt,
-    this.likes = const [],
-    this.commentCount = 0,
-    this.imageUrl,
-    this.linkUrl,
-    this.isPinned = false,
   });
 
   factory FeedModel.fromMap(Map<String, dynamic> map, String id) {
+    FeedType type;
+    switch (map['type'] as String? ?? 'social') {
+      case 'announcement':
+        type = FeedType.announcement;
+        break;
+      case 'prayer':
+        type = FeedType.prayer;
+        break;
+      default:
+        type = FeedType.social;
+    }
+
     return FeedModel(
       id: id,
+      type: type,
       title: map['title'] as String? ?? '',
       content: map['content'] as String? ?? '',
-      type: _typeFromString(map['type'] as String? ?? 'announcement'),
       authorId: map['authorId'] as String? ?? '',
-      authorName: map['authorName'] as String? ?? 'Admin',
-      authorAvatar: map['authorAvatar'] as String?,
-      familyId: map['familyId'] as String? ?? '',
+      authorName: map['authorName'] as String? ?? 'Unknown',
+      likedBy: List<String>.from(map['likedBy'] as List? ?? []),
+      commentCount: map['commentCount'] as int? ?? 0,
+      pollOptions: List<String>.from(map['pollOptions'] as List? ?? []),
+      pollVotes: Map<String, dynamic>.from(map['pollVotes'] as Map? ?? {}),
+      inKidFeed: map['inKidFeed'] as bool? ?? false,
       createdAt: map['createdAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['createdAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
-      likes: List<String>.from(map['likes'] as List? ?? []),
-      commentCount: map['commentCount'] as int? ?? 0,
-      imageUrl: map['imageUrl'] as String?,
-      linkUrl: map['linkUrl'] as String?,
-      isPinned: map['isPinned'] as bool? ?? false,
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
+      'type': type.name,
       'title': title,
       'content': content,
-      'type': type.name,
       'authorId': authorId,
       'authorName': authorName,
-      'authorAvatar': authorAvatar,
-      'familyId': familyId,
-      'createdAt': createdAt,
-      'likes': likes,
+      'likedBy': likedBy,
       'commentCount': commentCount,
-      'imageUrl': imageUrl,
-      'linkUrl': linkUrl,
-      'isPinned': isPinned,
+      'pollOptions': pollOptions,
+      'pollVotes': pollVotes,
+      'inKidFeed': inKidFeed,
+      'createdAt': createdAt,
     };
-  }
-
-  static FeedType _typeFromString(String s) {
-    switch (s) {
-      case 'news':
-        return FeedType.news;
-      case 'event':
-        return FeedType.event;
-      case 'photo':
-        return FeedType.photo;
-      case 'resource':
-        return FeedType.resource;
-      default:
-        return FeedType.announcement;
-    }
   }
 }

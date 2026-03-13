@@ -54,7 +54,7 @@ class AdminScreen extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
                 child: _buildStatCard('Families', Icons.family_restroom,
-                    '0', AppTheme.primary)),
+                    '0', AppTheme.navy)),
           ],
         ),
         const SizedBox(height: 12),
@@ -132,7 +132,7 @@ class AdminScreen extends StatelessWidget {
       {
         'icon': Icons.person_add_outlined,
         'label': 'Manage Members',
-        'color': AppTheme.primary,
+        'color': AppTheme.navy,
       },
       {
         'icon': Icons.bar_chart,
@@ -248,8 +248,8 @@ class AdminScreen extends StatelessWidget {
                 final roleColor = role == 'admin'
                     ? const Color(0xFF7B1FA2)
                     : role == 'kid'
-                        ? AppTheme.accent
-                        : AppTheme.primary;
+                        ? AppTheme.gold
+                        : AppTheme.navy;
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),

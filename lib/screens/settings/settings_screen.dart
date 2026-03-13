@@ -36,7 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(24),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [AppTheme.primaryDark, AppTheme.primary],
+                  colors: [AppTheme.navyDark, AppTheme.navy],
                 ),
               ),
               child: Column(
@@ -107,18 +107,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 context,
                 'Family Members',
                 Icons.family_restroom,
-                AppTheme.primary,
+                AppTheme.navy,
                 [
                   ...auth.kids.map((kid) => ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppTheme.accent
+                          backgroundColor: AppTheme.gold
                               .withValues(alpha: 0.15),
                           child: Text(
                             kid.displayName.isNotEmpty
                                 ? kid.displayName[0].toUpperCase()
                                 : '?',
                             style: const TextStyle(
-                                color: AppTheme.accent,
+                                color: AppTheme.gold,
                                 fontWeight: FontWeight.w700),
                           ),
                         ),
@@ -132,15 +132,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.15),
+                        color: AppTheme.navy.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.person_add,
-                          color: AppTheme.primary, size: 22),
+                          color: AppTheme.navy, size: 22),
                     ),
                     title: const Text('Add Kid Account'),
                     trailing: const Icon(Icons.add,
-                        color: AppTheme.primary, size: 20),
+                        color: AppTheme.navy, size: 20),
                     onTap: () => _showAddKidDialog(context),
                   ),
                 ],
@@ -209,7 +209,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: Switch(
                     value: true,
                     onChanged: (_) {},
-                    activeTrackColor: AppTheme.primary,
+                    activeTrackColor: AppTheme.navy,
                   ),
                 ),
                 ListTile(

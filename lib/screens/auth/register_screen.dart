@@ -89,7 +89,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 Container(
                   alignment: Alignment.center,
                   child: const Icon(Icons.family_restroom,
-                      size: 72, color: AppTheme.primary),
+                      size: 72, color: AppTheme.navy),
                 ),
                 const SizedBox(height: 16),
                 const Text(
@@ -196,7 +196,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: () => Navigator.pop(context),
                       child: const Text('Sign In',
                           style: TextStyle(
-                              color: AppTheme.primary,
+                              color: AppTheme.navy,
                               fontWeight: FontWeight.w600)),
                     ),
                   ],
