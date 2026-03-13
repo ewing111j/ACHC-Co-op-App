@@ -120,8 +120,6 @@ class _FeedTab extends StatelessWidget {
       stream: db
           .collection('feeds')
           .where('type', isEqualTo: type.name)
-          .orderBy('createdAt', descending: true)
-          .limit(50)
           .snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
@@ -129,21 +127,42 @@ class _FeedTab extends StatelessWidget {
         }
         if (snap.hasError) {
           return Center(
-            child: Text('Error loading feed', style: TextStyle(color: AppTheme.error)),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 48, color: AppTheme.error),
+                const SizedBox(height: 12),
+                Text('Error loading feed\n${snap.error}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+              ],
+            ),
           );
         }
 
         final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
+        // Sort in-memory: newest first
+        final sorted = [...docs];
+        sorted.sort((a, b) {
+          final aT = (a.data() as Map)['createdAt'];
+          final bT = (b.data() as Map)['createdAt'];
+          if (aT == null) return 1;
+          if (bT == null) return -1;
+          final aMs = (aT as Timestamp).millisecondsSinceEpoch;
+          final bMs = (bT as Timestamp).millisecondsSinceEpoch;
+          return bMs.compareTo(aMs);
+        });
+
+        if (sorted.isEmpty) {
           return _EmptyFeed(type: type);
         }
 
         return ListView.builder(
           padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
+          itemCount: sorted.length,
           itemBuilder: (ctx, i) {
-            final data = docs[i].data() as Map<String, dynamic>;
-            final post = FeedModel.fromMap(data, docs[i].id);
+            final data = sorted[i].data() as Map<String, dynamic>;
+            final post = FeedModel.fromMap(data, sorted[i].id);
             return _PostCard(post: post, user: user, db: db);
           },
         );

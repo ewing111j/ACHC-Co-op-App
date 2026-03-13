@@ -1,4 +1,5 @@
 // lib/services/auth_service.dart
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -120,26 +121,51 @@ class AuthService {
     }
   }
 
-  // Add kid to family (called by parent)
+  // Add kid to family (called by parent) — uses secondary FirebaseApp to
+  // avoid signing out the currently-logged-in parent.
   Future<UserModel?> addKidToFamily({
     required UserModel parent,
     required String kidName,
     required String kidPassword,
   }) async {
-    try {
-      final kidEmail = _buildKidEmail(parent.email, kidName);
+    if (kidName.trim().isEmpty) {
+      throw Exception('Kid name cannot be empty');
+    }
+    // Password is optional — generate one if blank
+    final finalPassword = kidPassword.trim().isEmpty
+        ? 'ACHC${kidName.trim().replaceAll(' ', '')}2024!'
+        : kidPassword.trim();
+    if (finalPassword.length < 6) {
+      throw Exception('Kid password must be at least 6 characters');
+    }
 
-      // Create Firebase Auth account for kid
-      final cred = await _auth.createUserWithEmailAndPassword(
-          email: kidEmail, password: kidPassword);
+    final kidEmail = _buildKidEmail(parent.email, kidName.trim());
+
+    try {
+      // Use a secondary Firebase App instance so the parent stays signed in
+      FirebaseApp? secondaryApp;
+      try {
+        secondaryApp = Firebase.app('kidCreation');
+      } catch (_) {
+        secondaryApp = await Firebase.initializeApp(
+          name: 'kidCreation',
+          options: Firebase.app().options,
+        );
+      }
+
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+      final cred = await secondaryAuth.createUserWithEmailAndPassword(
+          email: kidEmail, password: finalPassword);
       if (cred.user == null) throw Exception('Failed to create kid account');
 
-      await cred.user!.updateDisplayName(kidName);
+      await cred.user!.updateDisplayName(kidName.trim());
+      // Sign out of secondary app immediately (parent still logged in on primary)
+      await secondaryAuth.signOut();
 
       final kid = UserModel(
         uid: cred.user!.uid,
         email: kidEmail,
-        displayName: kidName,
+        displayName: kidName.trim(),
         role: UserRole.kid,
         parentUid: parent.uid,
         familyId: parent.familyId,
@@ -153,9 +179,8 @@ class AuthService {
       });
 
       // Update parent's kidUids
-      final updatedKidUids = [...parent.kidUids, kid.uid];
       await _db.collection('users').doc(parent.uid).update({
-        'kidUids': updatedKidUids,
+        'kidUids': FieldValue.arrayUnion([kid.uid]),
       });
 
       // Update family document
@@ -165,10 +190,6 @@ class AuthService {
           'kidUids': FieldValue.arrayUnion([kid.uid]),
         });
       }
-
-      // Sign back in as parent
-      await _auth.signInWithEmailAndPassword(
-          email: parent.email, password: '');
 
       return kid;
     } on FirebaseAuthException catch (e) {

@@ -165,7 +165,7 @@ class _CheckInTabState extends State<_CheckInTab> {
   }
 }
 
-// ── Check-In Card ─────────────────────────────────────────────────
+// ── Check-In Card (3-state: none → checked-in → checked-out → reset) ──
 class _CheckInCard extends StatefulWidget {
   final String name;
   final String subtitle;
@@ -186,10 +186,15 @@ class _CheckInCard extends StatefulWidget {
   State<_CheckInCard> createState() => _CheckInCardState();
 }
 
+// States: none | checkedIn | checkedOut
+enum _CIState { none, checkedIn, checkedOut }
+
 class _CheckInCardState extends State<_CheckInCard> {
-  bool _isCheckedIn = false;
+  _CIState _state = _CIState.none;
   bool _loading = false;
   String? _checkinId;
+  DateTime? _checkInTime;
+  DateTime? _checkOutTime;
 
   @override
   void initState() {
@@ -207,36 +212,74 @@ class _CheckInCardState extends State<_CheckInCard> {
         .limit(1)
         .get();
     if (snap.docs.isNotEmpty && mounted) {
+      final data = snap.docs.first.data();
+      final hasOut = data['checkOutTime'] != null;
       setState(() {
-        _isCheckedIn = true;
+        _state = hasOut ? _CIState.checkedOut : _CIState.checkedIn;
         _checkinId = snap.docs.first.id;
+        if (data['timestamp'] != null) {
+          _checkInTime = DateTime.fromMillisecondsSinceEpoch(
+              (data['timestamp'] as Timestamp).millisecondsSinceEpoch);
+        }
+        if (hasOut) {
+          _checkOutTime = DateTime.fromMillisecondsSinceEpoch(
+              (data['checkOutTime'] as Timestamp).millisecondsSinceEpoch);
+        }
       });
     }
   }
 
-  Future<void> _toggleCheckIn() async {
+  Future<void> _checkIn() async {
     setState(() => _loading = true);
     try {
-      if (_isCheckedIn && _checkinId != null) {
-        await widget.db.collection('checkins').doc(_checkinId).delete();
-        setState(() {
-          _isCheckedIn = false;
-          _checkinId = null;
-        });
-      } else {
-        final doc = await widget.db.collection('checkins').add({
-          'uid': widget.checkForUid,
-          'name': widget.name,
-          'checkedInBy': widget.user.uid,
-          'checkedInByName': widget.user.displayName,
-          'date': _todayKey,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-        setState(() {
-          _isCheckedIn = true;
-          _checkinId = doc.id;
-        });
-      }
+      final doc = await widget.db.collection('checkins').add({
+        'uid': widget.checkForUid,
+        'name': widget.name,
+        'checkedInBy': widget.user.uid,
+        'checkedInByName': widget.user.displayName,
+        'date': _todayKey,
+        'timestamp': FieldValue.serverTimestamp(),
+        'checkOutTime': null,
+        'status': 'checkedIn',
+      });
+      setState(() {
+        _state = _CIState.checkedIn;
+        _checkinId = doc.id;
+        _checkInTime = DateTime.now();
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _checkOut() async {
+    if (_checkinId == null) return;
+    setState(() => _loading = true);
+    try {
+      await widget.db.collection('checkins').doc(_checkinId).update({
+        'checkOutTime': FieldValue.serverTimestamp(),
+        'status': 'checkedOut',
+      });
+      setState(() {
+        _state = _CIState.checkedOut;
+        _checkOutTime = DateTime.now();
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _reset() async {
+    if (_checkinId == null) return;
+    setState(() => _loading = true);
+    try {
+      await widget.db.collection('checkins').doc(_checkinId).delete();
+      setState(() {
+        _state = _CIState.none;
+        _checkinId = null;
+        _checkInTime = null;
+        _checkOutTime = null;
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -244,17 +287,46 @@ class _CheckInCardState extends State<_CheckInCard> {
 
   @override
   Widget build(BuildContext context) {
+    final fmt = DateFormat('h:mm a');
+    Color borderColor;
+    Color iconBg;
+    Color iconColor;
+    IconData stateIcon;
+    String stateLabel;
+
+    switch (_state) {
+      case _CIState.checkedIn:
+        borderColor = AppTheme.success.withValues(alpha: 0.4);
+        iconBg = AppTheme.success.withValues(alpha: 0.1);
+        iconColor = AppTheme.success;
+        stateIcon = Icons.login_outlined;
+        stateLabel = 'In ${_checkInTime != null ? fmt.format(_checkInTime!) : ""}';
+        break;
+      case _CIState.checkedOut:
+        borderColor = AppTheme.navy.withValues(alpha: 0.3);
+        iconBg = AppTheme.navy.withValues(alpha: 0.08);
+        iconColor = AppTheme.navy;
+        stateIcon = Icons.check_circle_outline;
+        stateLabel =
+            'In ${_checkInTime != null ? fmt.format(_checkInTime!) : ""}  •  '
+            'Out ${_checkOutTime != null ? fmt.format(_checkOutTime!) : ""}';
+        break;
+      case _CIState.none:
+      default:
+        borderColor = AppTheme.cardBorder;
+        iconBg = AppTheme.surfaceVariant;
+        iconColor = AppTheme.textSecondary;
+        stateIcon = widget.icon;
+        stateLabel = widget.subtitle;
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _isCheckedIn
-              ? AppTheme.success.withValues(alpha: 0.4)
-              : AppTheme.cardBorder,
-        ),
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         children: [
@@ -262,15 +334,9 @@ class _CheckInCardState extends State<_CheckInCard> {
             width: 44, height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isCheckedIn
-                  ? AppTheme.success.withValues(alpha: 0.1)
-                  : AppTheme.surfaceVariant,
+              color: iconBg,
             ),
-            child: Icon(
-              _isCheckedIn ? Icons.check_circle : widget.icon,
-              color: _isCheckedIn ? AppTheme.success : AppTheme.textSecondary,
-              size: 24,
-            ),
+            child: Icon(stateIcon, color: iconColor, size: 24),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -280,34 +346,63 @@ class _CheckInCardState extends State<_CheckInCard> {
                 Text(widget.name,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, fontSize: 14)),
-                Text(
-                  _isCheckedIn ? 'Checked in ✓' : widget.subtitle,
-                  style: TextStyle(
-                    color: _isCheckedIn ? AppTheme.success : AppTheme.textHint,
-                    fontSize: 12,
-                  ),
-                ),
+                Text(stateLabel,
+                    style: TextStyle(
+                        color: _state == _CIState.none
+                            ? AppTheme.textHint
+                            : AppTheme.textSecondary,
+                        fontSize: 12)),
               ],
             ),
           ),
-          _loading
-              ? const SizedBox(
-                  width: 24, height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : OutlinedButton(
-                  onPressed: _toggleCheckIn,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _isCheckedIn ? AppTheme.error : AppTheme.success,
-                    side: BorderSide(
-                      color: _isCheckedIn ? AppTheme.error : AppTheme.success,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                  child: Text(_isCheckedIn ? 'Undo' : 'Check In'),
-                ),
+          const SizedBox(width: 8),
+          if (_loading)
+            const SizedBox(
+                width: 24, height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2))
+          else
+            _buildButton(),
         ],
       ),
     );
+  }
+
+  Widget _buildButton() {
+    switch (_state) {
+      case _CIState.none:
+        return ElevatedButton(
+          onPressed: _checkIn,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.success,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          child: const Text('Check In'),
+        );
+      case _CIState.checkedIn:
+        return ElevatedButton(
+          onPressed: _checkOut,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.warning,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          child: const Text('Check Out'),
+        );
+      case _CIState.checkedOut:
+        return OutlinedButton(
+          onPressed: _reset,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.textSecondary,
+            side: const BorderSide(color: AppTheme.cardBorder),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            textStyle: const TextStyle(fontSize: 12),
+          ),
+          child: const Text('Reset Day'),
+        );
+    }
   }
 }
 
@@ -325,7 +420,6 @@ class _AttendanceTab extends StatelessWidget {
       stream: db
           .collection('checkins')
           .where('date', isEqualTo: _todayKey)
-          .orderBy('timestamp', descending: false)
           .snapshots(),
       builder: (ctx, snap) {
         if (snap.connectionState == ConnectionState.waiting) {

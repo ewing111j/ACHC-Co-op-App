@@ -276,8 +276,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showAddKidDialog(BuildContext context) {
     final nameCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
     bool obscure = true;
+    bool adding = false;
 
     showDialog(
       context: context,
@@ -289,7 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Create a login for your child. They will use your email + their name + their password to sign in.',
+                  'Create a login for your child. They use your email + their name + password to sign in.',
                   style: TextStyle(
                       color: AppTheme.textSecondary, fontSize: 13),
                 ),
@@ -298,14 +298,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: nameCtrl,
                   textCapitalization: TextCapitalization.words,
                   decoration:
-                      const InputDecoration(labelText: "Kid's Name"),
+                      const InputDecoration(labelText: "Kid's Name *"),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: passwordCtrl,
                   obscureText: obscure,
                   decoration: InputDecoration(
-                    labelText: 'Password',
+                    labelText: 'Password (optional)',
+                    hintText: 'Leave blank to auto-generate',
                     suffixIcon: IconButton(
                       icon: Icon(
                           obscure
@@ -318,45 +319,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: confirmCtrl,
-                  obscureText: obscure,
-                  decoration: const InputDecoration(
-                      labelText: 'Confirm Password'),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.navy.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    '💡 If you leave the password blank, a password will be auto-generated. You can change it later.',
+                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  ),
                 ),
               ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: adding ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                if (nameCtrl.text.isEmpty || passwordCtrl.text.isEmpty) {
-                  return;
-                }
-                if (passwordCtrl.text != confirmCtrl.text) {
+              onPressed: adding ? null : () async {
+                if (nameCtrl.text.trim().isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                        content: Text('Passwords do not match'),
+                        content: Text('Please enter the kid\'s name'),
                         backgroundColor: AppTheme.error,
                         behavior: SnackBarBehavior.floating),
                   );
                   return;
                 }
-
+                setDialogState(() => adding = true);
                 final auth = context.read<AuthProvider>();
                 final success = await auth.addKid(
                     nameCtrl.text.trim(), passwordCtrl.text.trim());
-
+                setDialogState(() => adding = false);
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(success
-                          ? '${nameCtrl.text} added successfully!'
+                          ? '${nameCtrl.text.trim()} added successfully!'
                           : auth.errorMessage ?? 'Failed to add kid'),
                       backgroundColor:
                           success ? AppTheme.success : AppTheme.error,
@@ -365,7 +368,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 }
               },
-              child: const Text('Add Kid'),
+              child: adding
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Add Kid'),
             ),
           ],
         ),
