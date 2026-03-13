@@ -437,15 +437,34 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: f.color.withValues(alpha: 0.1),
-                      border: Border.all(
-                        color: f.color.withValues(alpha: 0.25), width: 1),
-                    ),
-                    child: Icon(f.icon, color: f.color, size: 22),
+                  // Icon with badge overlaid
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 44, height: 44,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: f.color.withValues(alpha: 0.1),
+                          border: Border.all(
+                            color: f.color.withValues(alpha: 0.25), width: 1),
+                        ),
+                        child: Icon(f.icon, color: f.color, size: 22),
+                      ),
+                      if (_notifPrefs[f.notifKey] ?? false)
+                        Positioned(
+                          top: -5,
+                          right: -5,
+                          child: _BadgeCounter(
+                            notifKey: f.notifKey ?? '',
+                            badgeQuery: f.badgeQuery,
+                            db: _db,
+                            userUid: user.uid,
+                            tileColor: f.color,
+                            lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(width: 14),
                   Text(f.label,
@@ -461,20 +480,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          // Badge sits inside the tile at the top-right corner
-          if (_notifPrefs[f.notifKey] ?? false)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: _BadgeCounter(
-                notifKey: f.notifKey ?? '',
-                badgeQuery: f.badgeQuery,
-                db: _db,
-                userUid: user.uid,
-                tileColor: f.color,
-                lastSeenTs: _lastSeenTs['lastseen_${f.seenKey}'] ?? 0,
-              ),
-            ),
         ],
       ),
     );
@@ -723,13 +728,14 @@ class _FeatureTile extends StatelessWidget {
           ),
         );
       },
-      child: Stack(
-        children: [
-          // Tile body — fills the grid cell given by GridView
-          Container(
-            decoration: AppTheme.featureTileDecoration(item.color),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      child: Container(
+        decoration: AppTheme.featureTileDecoration(item.color),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Icon with badge overlaid on top-right of the circle
+            Stack(
+              clipBehavior: Clip.none,
               children: [
                 Container(
                   width: 48, height: 48,
@@ -741,30 +747,29 @@ class _FeatureTile extends StatelessWidget {
                   ),
                   child: Icon(item.icon, color: item.color, size: 24),
                 ),
-                const SizedBox(height: 8),
-                Text(item.label,
-                  style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600,
-                    color: item.color, letterSpacing: 0.2),
-                  textAlign: TextAlign.center),
+                if (badgeEnabled && item.notifKey != null)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: _BadgeCounter(
+                      notifKey: item.notifKey!,
+                      badgeQuery: item.badgeQuery,
+                      db: db,
+                      userUid: userUid,
+                      tileColor: item.color,
+                      lastSeenTs: lastSeenTs,
+                    ),
+                  ),
               ],
             ),
-          ),
-          // Badge sits inside the tile at the top-right corner
-          if (badgeEnabled && item.notifKey != null)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: _BadgeCounter(
-                notifKey: item.notifKey!,
-                badgeQuery: item.badgeQuery,
-                db: db,
-                userUid: userUid,
-                tileColor: item.color,
-                lastSeenTs: lastSeenTs,
-              ),
-            ),
-        ],
+            const SizedBox(height: 8),
+            Text(item.label,
+              style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600,
+                color: item.color, letterSpacing: 0.2),
+              textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
