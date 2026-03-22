@@ -28,6 +28,7 @@ class _MessagesScreenState extends State<MessagesScreen>
   String _searchQuery = '';
   int _groupUnread = 0;
   int _personalUnread = 0;
+  int _lastTabIndex = 0;
 
   @override
   void initState() {
@@ -36,7 +37,14 @@ class _MessagesScreenState extends State<MessagesScreen>
     _searchCtrl.addListener(() {
       setState(() => _searchQuery = _searchCtrl.text.toLowerCase());
     });
-    _tabController.addListener(() => setState(() {}));
+    // Only rebuild when the tab index actually changes (not on every animation frame)
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging ||
+          _tabController.index != _lastTabIndex) {
+        _lastTabIndex = _tabController.index;
+        if (mounted) setState(() {});
+      }
+    });
   }
 
   @override
@@ -135,7 +143,7 @@ class _MessagesScreenState extends State<MessagesScreen>
             db: _db,
             searchQuery: _searchQuery,
             onUnreadChanged: (c) {
-              if (mounted) setState(() => _groupUnread = c);
+              if (mounted && c != _groupUnread) setState(() => _groupUnread = c);
             },
           ),
           _PersonalTab(
@@ -143,7 +151,7 @@ class _MessagesScreenState extends State<MessagesScreen>
             db: _db,
             searchQuery: _searchQuery,
             onUnreadChanged: (c) {
-              if (mounted) setState(() => _personalUnread = c);
+              if (mounted && c != _personalUnread) setState(() => _personalUnread = c);
             },
           ),
         ],
@@ -231,7 +239,7 @@ List<T> _rankBySearch<T>(
 }
 
 // ── GROUPS TAB ───────────────────────────────────────────────────
-class _GroupsTab extends StatelessWidget {
+class _GroupsTab extends StatefulWidget {
   final UserModel user;
   final FirebaseFirestore db;
   final String searchQuery;
@@ -242,9 +250,27 @@ class _GroupsTab extends StatelessWidget {
     required this.searchQuery,
     required this.onUnreadChanged,
   });
+  @override
+  State<_GroupsTab> createState() => _GroupsTabState();
+}
+
+class _GroupsTabState extends State<_GroupsTab> {
+  int _lastUnread = -1;
+
+  void _notifyUnread(int count) {
+    if (count != _lastUnread) {
+      _lastUnread = count;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onUnreadChanged(count);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final user = widget.user;
+    final db = widget.db;
+    final searchQuery = widget.searchQuery;
     return StreamBuilder<QuerySnapshot>(
       stream: db
           .collection('chatRooms')
@@ -280,9 +306,7 @@ class _GroupsTab extends StatelessWidget {
           final unread = (d.data() as Map)['unread_${user.uid}'] as int? ?? 0;
           return sum + unread;
         });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          onUnreadChanged(totalUnread);
-        });
+        _notifyUnread(totalUnread);
 
         // Filter by search
         final filtered = _rankBySearch(
@@ -390,7 +414,7 @@ class _GroupsTab extends StatelessWidget {
 }
 
 // ── PERSONAL TAB ─────────────────────────────────────────────────
-class _PersonalTab extends StatelessWidget {
+class _PersonalTab extends StatefulWidget {
   final UserModel user;
   final FirebaseFirestore db;
   final String searchQuery;
@@ -401,9 +425,27 @@ class _PersonalTab extends StatelessWidget {
     required this.searchQuery,
     required this.onUnreadChanged,
   });
+  @override
+  State<_PersonalTab> createState() => _PersonalTabState();
+}
+
+class _PersonalTabState extends State<_PersonalTab> {
+  int _lastUnread = -1;
+
+  void _notifyUnread(int count) {
+    if (count != _lastUnread) {
+      _lastUnread = count;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onUnreadChanged(count);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final user = widget.user;
+    final db = widget.db;
+    final searchQuery = widget.searchQuery;
     return StreamBuilder<QuerySnapshot>(
       stream: db
           .collection('chatRooms')
@@ -430,9 +472,7 @@ class _PersonalTab extends StatelessWidget {
           final unread = (d.data() as Map)['unread_${user.uid}'] as int? ?? 0;
           return sum + unread;
         });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          onUnreadChanged(totalUnread);
-        });
+        _notifyUnread(totalUnread);
 
         final filtered = _rankBySearch(
           sorted,

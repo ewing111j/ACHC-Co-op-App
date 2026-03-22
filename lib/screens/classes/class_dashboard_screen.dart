@@ -607,17 +607,18 @@ class _WeekContent extends StatelessWidget {
           .collection('weeks')
           .doc(week.id)
           .collection('homework')
-          .orderBy('sortOrder')
-          .snapshots(),
+          .snapshots(), // No orderBy — avoids requiring a Firestore index
       builder: (ctx, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
         final docs = snap.data?.docs ?? [];
+        // All roles see homework — mentors also see hidden items
         final homework = docs
             .map((d) => HomeworkModel.fromMap(d.data() as Map<String, dynamic>, d.id))
             .where((h) => user.canEditClasses || !h.isHidden)
-            .toList();
+            .toList()
+          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder)); // sort in memory
 
         // Overdue items (past weeks)
         final now = DateTime.now();
@@ -935,7 +936,9 @@ class _HomeworkCardState extends State<_HomeworkCard> {
                           _HomeworkMenu(
                             homework: hw,
                             db: widget.db,
-                            classId: widget.classModel.id,
+                            classModel: widget.classModel,
+                            week: widget.week,
+                            user: widget.user,
                           ),
                       ],
                     ),
@@ -1037,9 +1040,19 @@ class _HomeworkCardState extends State<_HomeworkCard> {
       }
     });
     try {
+      // Nested path: classes/{id}/weeks/{weekId}/homework/{hwId}/submissions
+      final subColRef = widget.db
+          .collection('classes')
+          .doc(widget.homework.classId)
+          .collection('weeks')
+          .doc(widget.homework.weekId)
+          .collection('homework')
+          .doc(widget.homework.id)
+          .collection('submissions');
+
       if (_submission!.id.isEmpty) {
         // Create new submission
-        final ref = widget.db.collection('submissions').doc();
+        final ref = subColRef.doc();
         await ref.set({
           ..._submission!.toMap(),
           'submittedAt': FieldValue.serverTimestamp(),
@@ -1055,7 +1068,7 @@ class _HomeworkCardState extends State<_HomeworkCard> {
               submittedAt: DateTime.now(),
             ));
       } else {
-        await widget.db.collection('submissions').doc(_submission!.id).update({
+        await subColRef.doc(_submission!.id).update({
           'status': _submission!.status,
           'submittedAt': FieldValue.serverTimestamp(),
         });
@@ -1126,39 +1139,94 @@ class _GradeBadge extends StatelessWidget {
 class _HomeworkMenu extends StatelessWidget {
   final HomeworkModel homework;
   final FirebaseFirestore db;
-  final String classId;
-  const _HomeworkMenu(
-      {required this.homework, required this.db, required this.classId});
+  final ClassModel classModel;
+  final ClassWeekModel week;
+  final UserModel user;
+  const _HomeworkMenu({
+    required this.homework,
+    required this.db,
+    required this.classModel,
+    required this.week,
+    required this.user,
+  });
+
+  // Correct nested path: classes/{id}/weeks/{weekId}/homework/{hwId}
+  DocumentReference get _hwRef => db
+      .collection('classes')
+      .doc(classModel.id)
+      .collection('weeks')
+      .doc(week.id)
+      .collection('homework')
+      .doc(homework.id);
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert, size: 16, color: AppTheme.textHint),
       onSelected: (v) async {
-        if (v == 'hide') {
-          await db
-              .collection('classes')
-              .doc(classId)
-              .collection('homework')
-              .doc(homework.id)
-              .update({'isHidden': !homework.isHidden});
+        if (v == 'edit') {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkSheet(
+              classModel: classModel,
+              week: week,
+              user: user,
+              db: db,
+              editHw: homework,
+            ),
+          );
+        } else if (v == 'hide') {
+          await _hwRef.update({'isHidden': !homework.isHidden});
         } else if (v == 'delete') {
-          await db
-              .collection('classes')
-              .doc(classId)
-              .collection('homework')
-              .doc(homework.id)
-              .delete();
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Delete Homework?'),
+              content: Text('Delete "${homework.title}"? This cannot be undone.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel')),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.error,
+                      foregroundColor: Colors.white),
+                  child: const Text('Delete'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed == true) await _hwRef.delete();
         }
       },
       itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: 'edit',
+          child: Row(children: [
+            Icon(Icons.edit_outlined, size: 16),
+            SizedBox(width: 8),
+            Text('Edit'),
+          ]),
+        ),
         PopupMenuItem(
           value: 'hide',
-          child: Text(homework.isHidden ? 'Show' : 'Hide'),
+          child: Row(children: [
+            Icon(homework.isHidden ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                size: 16),
+            const SizedBox(width: 8),
+            Text(homework.isHidden ? 'Show' : 'Hide'),
+          ]),
         ),
         const PopupMenuItem(
           value: 'delete',
-          child: Text('Delete', style: TextStyle(color: AppTheme.error)),
+          child: Row(children: [
+            Icon(Icons.delete_outline, size: 16, color: AppTheme.error),
+            SizedBox(width: 8),
+            Text('Delete', style: TextStyle(color: AppTheme.error)),
+          ]),
         ),
       ],
     );
