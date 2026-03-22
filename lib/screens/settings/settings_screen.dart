@@ -463,6 +463,7 @@ class _StudentTile extends StatefulWidget {
 class _StudentTileState extends State<_StudentTile> {
   List<String> _classNames = [];
   bool _loaded = false;
+  final _db = FirebaseFirestore.instance;
 
   @override
   void initState() {
@@ -472,10 +473,10 @@ class _StudentTileState extends State<_StudentTile> {
 
   Future<void> _loadClasses() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('groups')
-          .where('type', isEqualTo: 'class')
-          .where('memberUids', arrayContains: widget.kid.uid)
+      // Use the 'classes' collection (correct path) instead of 'groups'
+      final snap = await _db
+          .collection('classes')
+          .where('enrolledUids', arrayContains: widget.kid.uid)
           .get();
       final names = snap.docs
           .map((d) => d.data()['name'] as String? ?? '')
@@ -493,8 +494,105 @@ class _StudentTileState extends State<_StudentTile> {
     }
   }
 
+  Future<void> _editName(BuildContext context) async {
+    final ctrl = TextEditingController(text: widget.kid.displayName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Student Name'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.navy, foregroundColor: Colors.white),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (newName == null || newName.isEmpty || newName == widget.kid.displayName) return;
+    try {
+      await _db.collection('users').doc(widget.kid.uid).update({'displayName': newName});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Renamed to $newName'), backgroundColor: AppTheme.success,
+              behavior: SnackBarBehavior.floating));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating));
+      }
+    }
+  }
+
+  Future<void> _removeStudent(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Student'),
+        content: Text(
+            'Remove "${widget.kid.displayName}" from your family? '
+            'Their account will remain but be unlinked from your profile.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red, foregroundColor: Colors.white),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final parentUid = context.read<AuthProvider>().currentUser?.uid;
+    if (parentUid == null) return;
+    try {
+      final batch = _db.batch();
+      // Remove kid from parent's kidUids
+      batch.update(_db.collection('users').doc(parentUid), {
+        'kidUids': FieldValue.arrayRemove([widget.kid.uid]),
+      });
+      // Clear parentUid on the student
+      batch.update(_db.collection('users').doc(widget.kid.uid), {
+        'parentUid': FieldValue.delete(),
+        'needsClaim': true,
+      });
+      await batch.commit();
+      if (mounted) {
+        context.read<AuthProvider>().refreshStudents();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('${widget.kid.displayName} removed from family'),
+              backgroundColor: AppTheme.success,
+              behavior: SnackBarBehavior.floating));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Determine label: imported students may have role 'student' even when
+    // their Firestore doc says parent — always show 'Student' for kids listed here.
+    const roleLabel = 'Student';
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
       child: Row(
@@ -524,10 +622,12 @@ class _StudentTileState extends State<_StudentTile> {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        widget.kid.displayName,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14),
+                      Expanded(
+                        child: Text(
+                          widget.kid.displayName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Container(
@@ -537,8 +637,8 @@ class _StudentTileState extends State<_StudentTile> {
                           color: AppTheme.navy.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text('Student',
-                            style: TextStyle(
+                        child: Text(roleLabel,
+                            style: const TextStyle(
                                 fontSize: 10,
                                 color: AppTheme.navy,
                                 fontWeight: FontWeight.w600)),
@@ -580,10 +680,31 @@ class _StudentTileState extends State<_StudentTile> {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.only(top: 14, right: 8),
-            child: Icon(Icons.person_outline, size: 18,
-                color: AppTheme.textHint),
+          // Edit / remove popup
+          Padding(
+            padding: const EdgeInsets.only(top: 6, right: 4),
+            child: PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 18, color: AppTheme.textHint),
+              onSelected: (v) {
+                if (v == 'edit') _editName(context);
+                if (v == 'remove') _removeStudent(context);
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                    value: 'edit',
+                    child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.edit_outlined, size: 18),
+                        title: Text('Rename'))),
+                const PopupMenuItem(
+                    value: 'remove',
+                    child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.link_off, size: 18, color: Colors.red),
+                        title: Text('Unlink from family',
+                            style: TextStyle(color: Colors.red)))),
+              ],
+            ),
           ),
         ],
       ),

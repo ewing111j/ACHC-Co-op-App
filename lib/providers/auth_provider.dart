@@ -60,6 +60,9 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Public method for parent tiles to trigger a student list refresh
+  Future<void> refreshStudents() async => _loadStudents();
+
   Future<bool> signIn(String email, String password) async {
     _setState(AuthState.loading);
     try {

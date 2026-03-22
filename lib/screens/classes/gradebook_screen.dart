@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -20,9 +21,7 @@ class GradebookScreen extends StatefulWidget {
 
 class _GradebookScreenState extends State<GradebookScreen> {
   final _db = FirebaseFirestore.instance;
-  // When true, show all items as complete/incomplete even if grading mode is percent
   bool _simpleView = false;
-  String _filterStudentUid = ''; // empty = all
   bool _loading = true;
   List<Map<String, dynamic>> _gradebookData = [];
   List<HomeworkModel> _allHomework = [];
@@ -58,12 +57,21 @@ class _GradebookScreenState extends State<GradebookScreen> {
             .collection('weeks')
             .doc(week.id)
             .collection('homework')
-            .orderBy('order')
             .get();
-        allHw.addAll(hwSnap.docs
-            .map((d) => HomeworkModel.fromMap(d.data(), d.id, cls.id, week.id)));
+        final sorted = hwSnap.docs
+            .map((d) => HomeworkModel.fromMap(d.data(), d.id, cls.id, week.id))
+            .toList()
+          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+        allHw.addAll(sorted);
       }
       _allHomework = allHw;
+
+      // Determine which student UIDs to show
+      final allStudentUids = cls.enrolledUids;
+      // For students: only their own UID
+      final List<String> studentUids = widget.user.isStudent
+          ? (allStudentUids.contains(widget.user.uid) ? [widget.user.uid] : [])
+          : allStudentUids;
 
       // Get all submissions
       final Map<String, Map<String, SubmissionModel>> hwToStudentSub = {};
@@ -86,9 +94,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         }
       }
 
-      // Build per-student data
-      final studentUids = widget.classModel.enrolledUids;
-      // Get student names from Firestore
+      // Get student names
       final Map<String, String> studentNames = {};
       for (final uid in studentUids) {
         try {
@@ -99,7 +105,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         }
       }
 
-      // Build rows
+      // Build per-student rows
       final rows = <Map<String, dynamic>>[];
       for (final uid in studentUids) {
         double totalPct = 0;
@@ -109,7 +115,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         for (final hw in allHw) {
           final sub = hwToStudentSub[hw.id]?[uid];
           if (sub == null) {
-            hwGrades[hw.id] = null; // not submitted
+            hwGrades[hw.id] = null;
           } else if (sub.status == 'graded' && hw.gradingMode == 'percent') {
             hwGrades[hw.id] = sub.grade;
             countGraded++;
@@ -139,9 +145,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         });
       }
 
-      // Sort by name
-      rows.sort((a, b) =>
-          (a['name'] as String).compareTo(b['name'] as String));
+      rows.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
 
       if (mounted) {
         setState(() {
@@ -168,8 +172,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
         pw.Header(
           level: 0,
           child: pw.Text('${cls.name} – Gradebook',
-              style: pw.TextStyle(
-                  fontSize: 18, fontWeight: pw.FontWeight.bold)),
+              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
         ),
         pw.Text(
             'Generated: ${DateFormat('MMM d, yyyy · h:mm a').format(DateTime.now())}',
@@ -200,23 +203,35 @@ class _GradebookScreenState extends State<GradebookScreen> {
               }),
             ];
           }).toList(),
-          headerStyle:
-              pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
           cellStyle: const pw.TextStyle(fontSize: 9),
         ),
       ],
     ));
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save());
+  }
 
-    await Printing.layoutPdf(
-        onLayout: (format) async => pdf.save());
+  void _openSubmissionView(HomeworkModel hw) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SubmissionViewSheet(
+        hw: hw,
+        classModel: widget.classModel,
+        db: _db,
+        onGraded: _loadGradebook,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final cls = widget.classModel;
     final user = widget.user;
-    final canView = user.canMentor || user.isAdmin ||
-        (user.isStudent && !cls.gradebookSimple);
+    final canMentor = user.canMentor || user.isAdmin;
+    // Students can view their own grades unless gradebook is hidden
+    final canView = canMentor || (user.isStudent && !cls.gradebookSimple);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -227,7 +242,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          if (user.canMentor || user.isAdmin) ...[
+          if (canMentor) ...[
             IconButton(
               icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
               tooltip: 'Export PDF',
@@ -242,39 +257,62 @@ class _GradebookScreenState extends State<GradebookScreen> {
       ),
       body: !canView
           ? const Center(
-              child: Text('Gradebook is not available for your role.',
+              child: Text('Grades are not available yet.',
                   style: TextStyle(color: AppTheme.textSecondary)))
           : _loading
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
+                    // Student notice
+                    if (user.isStudent)
+                      Container(
+                        width: double.infinity,
+                        color: AppTheme.classesColor.withValues(alpha: 0.08),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Row(children: [
+                          Icon(Icons.lock_outline, size: 14,
+                              color: AppTheme.classesColor.withValues(alpha: 0.7)),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text('You can see your own grades only.',
+                                style: TextStyle(fontSize: 12,
+                                    color: AppTheme.textSecondary)),
+                          ),
+                        ]),
+                      ),
+                    // Mentor hint for submission view
+                    if (canMentor && _allHomework.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        color: AppTheme.navy.withValues(alpha: 0.05),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        child: const Text(
+                            'Tap any assignment column header to view & grade submissions.',
+                            style: TextStyle(fontSize: 11,
+                                color: AppTheme.textSecondary)),
+                      ),
                     // Toggle simple view
                     Container(
                       color: AppTheme.surface,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Row(
                         children: [
                           const Text('View:',
                               style: TextStyle(
-                                  fontSize: 13,
-                                  color: AppTheme.textSecondary)),
+                                  fontSize: 13, color: AppTheme.textSecondary)),
                           const SizedBox(width: 12),
                           ChoiceChip(
                             label: const Text('Complete/Incomplete'),
                             selected: _simpleView,
                             onSelected: (_) => setState(() => _simpleView = true),
-                            selectedColor:
-                                AppTheme.classesColor.withValues(alpha: 0.2),
+                            selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
                           ),
                           const SizedBox(width: 8),
                           ChoiceChip(
                             label: const Text('Grades'),
                             selected: !_simpleView,
-                            onSelected: (_) =>
-                                setState(() => _simpleView = false),
-                            selectedColor:
-                                AppTheme.classesColor.withValues(alpha: 0.2),
+                            onSelected: (_) => setState(() => _simpleView = false),
+                            selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
                           ),
                         ],
                       ),
@@ -285,58 +323,75 @@ class _GradebookScreenState extends State<GradebookScreen> {
                           ? const Center(
                               child: Text('No student data.',
                                   style: TextStyle(color: AppTheme.textSecondary)))
-                          : _buildTable(),
+                          : _buildTable(canMentor),
                     ),
                   ],
                 ),
     );
   }
 
-  Widget _buildTable() {
+  Widget _buildTable(bool canMentor) {
     return SingleChildScrollView(
       scrollDirection: Axis.vertical,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(AppTheme.navy.withValues(alpha: 0.08)),
+          headingRowColor: WidgetStateProperty.all(
+              AppTheme.navy.withValues(alpha: 0.08)),
           columnSpacing: 14,
           dataRowMinHeight: 40,
           dataRowMaxHeight: 52,
           columns: [
             const DataColumn(
                 label: Text('Student',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.navy))),
+                    style: TextStyle(fontSize: 12,
+                        fontWeight: FontWeight.bold, color: AppTheme.navy))),
             const DataColumn(
                 numeric: true,
                 label: Text('Done %',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.navy))),
+                    style: TextStyle(fontSize: 12,
+                        fontWeight: FontWeight.bold, color: AppTheme.navy))),
             if (!_simpleView)
               const DataColumn(
                   numeric: true,
                   label: Text('Avg',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.navy))),
+                      style: TextStyle(fontSize: 12,
+                          fontWeight: FontWeight.bold, color: AppTheme.navy))),
             ..._allHomework.map((hw) => DataColumn(
-                label: SizedBox(
-                  width: 70,
-                  child: Text(
-                    hw.title,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 2,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.navy),
-                  ),
-                ))),
+                label: canMentor
+                    ? InkWell(
+                        onTap: () => _openSubmissionView(hw),
+                        child: SizedBox(
+                          width: 70,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(hw.title,
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.navy)),
+                              const Text('tap to grade',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: AppTheme.classesColor)),
+                            ],
+                          ),
+                        ),
+                      )
+                    : SizedBox(
+                        width: 70,
+                        child: Text(hw.title,
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.navy)),
+                      ))),
           ],
           rows: _gradebookData.map((row) {
             final pct = (row['completionPct'] as double);
@@ -344,8 +399,8 @@ class _GradebookScreenState extends State<GradebookScreen> {
             final hwGrades = row['hwGrades'] as Map<String, dynamic>;
             return DataRow(cells: [
               DataCell(Text(row['name'] as String,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w500))),
+                  style: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w500))),
               DataCell(_ProgressCell(pct: pct)),
               if (!_simpleView)
                 DataCell(Text(
@@ -377,6 +432,504 @@ class _GradebookScreenState extends State<GradebookScreen> {
     return Colors.red;
   }
 }
+
+// ── Submission View Sheet ─────────────────────────────────────────────────────
+/// Mentor/admin view: lists all students' submissions for a given homework,
+/// and allows entering grades inline.
+class _SubmissionViewSheet extends StatefulWidget {
+  final HomeworkModel hw;
+  final ClassModel classModel;
+  final FirebaseFirestore db;
+  final VoidCallback onGraded;
+
+  const _SubmissionViewSheet({
+    required this.hw,
+    required this.classModel,
+    required this.db,
+    required this.onGraded,
+  });
+
+  @override
+  State<_SubmissionViewSheet> createState() => _SubmissionViewSheetState();
+}
+
+class _SubmissionViewSheetState extends State<_SubmissionViewSheet> {
+  bool _loading = true;
+  List<_StudentSubmission> _items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubmissions();
+  }
+
+  Future<void> _loadSubmissions() async {
+    setState(() => _loading = true);
+    try {
+      final hw = widget.hw;
+      final cls = widget.classModel;
+      final db = widget.db;
+
+      // Get all students
+      final Map<String, String> names = {};
+      for (final uid in cls.enrolledUids) {
+        try {
+          final doc = await db.collection('users').doc(uid).get();
+          names[uid] = doc.data()?['displayName'] as String? ?? uid;
+        } catch (_) {
+          names[uid] = uid;
+        }
+      }
+
+      // Get submissions
+      final subSnap = await db
+          .collection('classes')
+          .doc(cls.id)
+          .collection('weeks')
+          .doc(hw.weekId)
+          .collection('homework')
+          .doc(hw.id)
+          .collection('submissions')
+          .get();
+
+      final Map<String, SubmissionModel> subByUid = {};
+      for (final doc in subSnap.docs) {
+        final s = SubmissionModel.fromMap(doc.data(), doc.id);
+        subByUid[s.studentUid] = s;
+      }
+
+      final items = cls.enrolledUids.map((uid) {
+        return _StudentSubmission(
+          uid: uid,
+          name: names[uid] ?? uid,
+          submission: subByUid[uid],
+        );
+      }).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+      if (mounted) setState(() { _items = items; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hw = widget.hw;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.85,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (_, ctrl) => Column(
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppTheme.dividerColor,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(children: [
+                const Icon(Icons.assignment_turned_in_outlined,
+                    color: AppTheme.navy, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(hw.title,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.navy)),
+                      Text(
+                          '${_items.where((i) => i.submission?.isComplete == true).length}/${_items.length} submitted',
+                          style: const TextStyle(
+                              fontSize: 12, color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+            AppTheme.goldDivider(),
+            if (_loading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else
+              Expanded(
+                child: ListView.separated(
+                  controller: ctrl,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _items.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) => _SubmissionTile(
+                    item: _items[i],
+                    hw: hw,
+                    classModel: widget.classModel,
+                    db: widget.db,
+                    onGraded: () {
+                      _loadSubmissions();
+                      widget.onGraded();
+                    },
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StudentSubmission {
+  final String uid;
+  final String name;
+  final SubmissionModel? submission;
+  const _StudentSubmission({required this.uid, required this.name, this.submission});
+}
+
+class _SubmissionTile extends StatefulWidget {
+  final _StudentSubmission item;
+  final HomeworkModel hw;
+  final ClassModel classModel;
+  final FirebaseFirestore db;
+  final VoidCallback onGraded;
+
+  const _SubmissionTile({
+    required this.item,
+    required this.hw,
+    required this.classModel,
+    required this.db,
+    required this.onGraded,
+  });
+
+  @override
+  State<_SubmissionTile> createState() => _SubmissionTileState();
+}
+
+class _SubmissionTileState extends State<_SubmissionTile> {
+  bool _expanded = false;
+  bool _saving = false;
+  double? _gradeInput;
+  late TextEditingController _feedbackCtrl;
+  late TextEditingController _gradeCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _gradeInput = widget.item.submission?.grade;
+    _feedbackCtrl = TextEditingController(
+        text: widget.item.submission?.feedback ?? '');
+    _gradeCtrl = TextEditingController(
+        text: _gradeInput?.toString() ?? '');
+  }
+
+  @override
+  void dispose() {
+    _feedbackCtrl.dispose();
+    _gradeCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveGrade() async {
+    final sub = widget.item.submission;
+    if (sub == null) return;
+    setState(() => _saving = true);
+    try {
+      await widget.db
+          .collection('classes')
+          .doc(widget.classModel.id)
+          .collection('weeks')
+          .doc(widget.hw.weekId)
+          .collection('homework')
+          .doc(widget.hw.id)
+          .collection('submissions')
+          .doc(sub.id)
+          .update({
+        'grade': _gradeInput,
+        'feedback': _feedbackCtrl.text.trim(),
+        'status': 'graded',
+        'gradedAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        setState(() { _saving = false; _expanded = false; });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Grade saved'),
+            backgroundColor: AppTheme.success,
+            behavior: SnackBarBehavior.floating));
+        widget.onGraded();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _markComplete() async {
+    final sub = widget.item.submission;
+    if (sub == null) return;
+    setState(() => _saving = true);
+    try {
+      await widget.db
+          .collection('classes')
+          .doc(widget.classModel.id)
+          .collection('weeks')
+          .doc(widget.hw.weekId)
+          .collection('homework')
+          .doc(widget.hw.id)
+          .collection('submissions')
+          .doc(sub.id)
+          .update({
+        'status': 'graded',
+        'gradedAt': FieldValue.serverTimestamp(),
+        'feedback': _feedbackCtrl.text.trim(),
+      });
+      if (mounted) {
+        setState(() { _saving = false; _expanded = false; });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Marked as complete'),
+            backgroundColor: AppTheme.success,
+            behavior: SnackBarBehavior.floating));
+        widget.onGraded();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = widget.item.submission;
+    final isSubmitted = sub?.isComplete == true;
+    final isGraded = sub?.status == 'graded';
+
+    Color statusColor;
+    String statusLabel;
+    if (sub == null) {
+      statusColor = Colors.grey;
+      statusLabel = 'Not submitted';
+    } else if (isGraded) {
+      statusColor = AppTheme.success;
+      statusLabel = 'Graded';
+    } else if (isSubmitted) {
+      statusColor = AppTheme.classesColor;
+      statusLabel = 'Submitted';
+    } else {
+      statusColor = Colors.orange;
+      statusLabel = 'Pending';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          leading: CircleAvatar(
+            radius: 18,
+            backgroundColor: statusColor.withValues(alpha: 0.12),
+            child: Text(
+              widget.item.name.isNotEmpty ? widget.item.name[0].toUpperCase() : '?',
+              style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+          ),
+          title: Text(widget.item.name,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          subtitle: sub != null
+              ? Text(
+                  '${statusLabel}${sub.grade != null ? ' · ${sub.grade!.toStringAsFixed(1)}' : ''}',
+                  style: TextStyle(fontSize: 11, color: statusColor))
+              : Text(statusLabel,
+                  style: TextStyle(fontSize: 11, color: statusColor)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Download file if present
+              if (sub?.fileUrl != null)
+                IconButton(
+                  icon: const Icon(Icons.download_outlined, size: 18,
+                      color: AppTheme.navy),
+                  tooltip: 'Download: ${sub!.fileName ?? 'file'}',
+                  onPressed: () async {
+                    final url = sub.fileUrl!;
+                    if (await canLaunchUrl(Uri.parse(url))) {
+                      await launchUrl(Uri.parse(url),
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
+              if (sub != null)
+                IconButton(
+                  icon: Icon(
+                    _expanded ? Icons.expand_less : Icons.grade_outlined,
+                    size: 18,
+                    color: AppTheme.navy,
+                  ),
+                  tooltip: 'Grade',
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                ),
+            ],
+          ),
+        ),
+        // Expandable grading panel
+        if (_expanded && sub != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.navy.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.dividerColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Checklist items if any
+                  if (widget.hw.checklist.isNotEmpty) ...[
+                    const Text('Checklist',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.navy)),
+                    const SizedBox(height: 4),
+                    ...widget.hw.checklist.map((item) {
+                      // checklistDone keys are the item text strings
+                      final done = sub.checklistDone[item] ?? false;
+                      return Row(children: [
+                        Icon(done ? Icons.check_box : Icons.check_box_outline_blank,
+                            size: 14,
+                            color: done ? AppTheme.success : Colors.grey),
+                        const SizedBox(width: 6),
+                        Expanded(
+                            child: Text(item,
+                                style: const TextStyle(fontSize: 12))),
+                      ]);
+                    }),
+                    const SizedBox(height: 8),
+                  ],
+                  // File attached
+                  if (sub.fileUrl != null) ...[
+                    InkWell(
+                      onTap: () async {
+                        final url = sub.fileUrl!;
+                        if (await canLaunchUrl(Uri.parse(url))) {
+                          await launchUrl(Uri.parse(url),
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      child: Row(children: [
+                        const Icon(Icons.attach_file, size: 14,
+                            color: AppTheme.navy),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(sub.fileName ?? 'Attached file',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.navy,
+                                  decoration: TextDecoration.underline)),
+                        ),
+                        const Icon(Icons.open_in_new, size: 12,
+                            color: AppTheme.navy),
+                      ]),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  // Grade input (percent mode)
+                  if (widget.hw.gradingMode == 'percent') ...[
+                    TextField(
+                      controller: _gradeCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: widget.hw.maxPoints != null
+                            ? 'Points (max ${widget.hw.maxPoints})'
+                            : 'Percentage (0–100)',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (v) => _gradeInput = double.tryParse(v),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  // Feedback
+                  TextField(
+                    controller: _feedbackCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'Feedback (optional)',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    if (widget.hw.gradingMode == 'percent')
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _saving ? null : _saveGrade,
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.check, size: 16),
+                          label: const Text('Save Grade'),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.navy,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10)),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _saving ? null : _markComplete,
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.check_circle, size: 16),
+                          label: const Text('Mark Complete'),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.success,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10)),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => setState(() => _expanded = false),
+                      child: const Text('Cancel'),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ── Shared helper widgets ─────────────────────────────────────────────────────
 
 class _ProgressCell extends StatelessWidget {
   final double pct;
@@ -417,11 +970,12 @@ class _GradeCell extends StatelessWidget {
   final String gradingMode;
   final bool simpleView;
   final ClassModel cls;
-  const _GradeCell(
-      {required this.grade,
-      required this.gradingMode,
-      required this.simpleView,
-      required this.cls});
+  const _GradeCell({
+    required this.grade,
+    required this.gradingMode,
+    required this.simpleView,
+    required this.cls,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -438,7 +992,6 @@ class _GradeCell extends StatelessWidget {
     if (grade == 'pending') {
       return const Icon(Icons.circle_outlined, size: 16, color: Colors.grey);
     }
-    // Numeric grade
     final g = grade as double;
     final pct = cls.maxPct(g);
     return Text('${pct.toStringAsFixed(0)}%',

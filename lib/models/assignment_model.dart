@@ -21,6 +21,13 @@ class AssignmentModel {
   /// Non-null for repeating series; all instances share the same seriesId.
   final String? seriesId;
 
+  // ── Class homework fields (populated when fromClass == true) ──────────────
+  /// When true this assignment originated from a class homework document.
+  final bool fromClass;
+  final String? classId;
+  final String? weekId;
+  final String? homeworkId;
+
   const AssignmentModel({
     required this.id,
     required this.title,
@@ -38,6 +45,10 @@ class AssignmentModel {
     required this.familyId,
     required this.createdAt,
     this.seriesId,
+    this.fromClass = false,
+    this.classId,
+    this.weekId,
+    this.homeworkId,
   });
 
   bool get isOverdue =>
@@ -93,6 +104,10 @@ class AssignmentModel {
               (map['createdAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
       seriesId: map['seriesId'] as String?,
+      fromClass: map['fromClass'] as bool? ?? false,
+      classId: map['classId'] as String?,
+      weekId: map['weekId'] as String?,
+      homeworkId: map['homeworkId'] as String?,
     );
   }
 
@@ -113,6 +128,10 @@ class AssignmentModel {
       'familyId': familyId,
       'createdAt': createdAt,
       if (seriesId != null) 'seriesId': seriesId,
+      if (fromClass) 'fromClass': true,
+      if (classId != null) 'classId': classId,
+      if (weekId != null) 'weekId': weekId,
+      if (homeworkId != null) 'homeworkId': homeworkId,
     };
   }
 
@@ -135,10 +154,14 @@ class AssignmentModel {
       'familyId': familyId,
       'createdAt': {'millisecondsSinceEpoch': createdAt.millisecondsSinceEpoch},
       if (seriesId != null) 'seriesId': seriesId,
+      if (fromClass) 'fromClass': true,
+      if (classId != null) 'classId': classId,
+      if (weekId != null) 'weekId': weekId,
+      if (homeworkId != null) 'homeworkId': homeworkId,
     };
   }
 
-  static AssignmentStatus _statusFromString(String s) {
+  static AssignmentStatus statusFromString(String s) {
     switch (s) {
       case 'submitted':
         return AssignmentStatus.submitted;
@@ -150,6 +173,9 @@ class AssignmentModel {
         return AssignmentStatus.pending;
     }
   }
+
+  // Keep private alias for internal fromMap usage
+  static AssignmentStatus _statusFromString(String s) => statusFromString(s);
 
   static String _stripHtml(String html) {
     return html

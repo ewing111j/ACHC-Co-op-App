@@ -1,5 +1,6 @@
 // lib/providers/assignments_provider.dart
 // Provider-based state management for assignments with Hive offline caching.
+// Also merges class homework into the feed for students.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -12,17 +13,29 @@ const _kAssignmentsBox = 'assignments_cache';
 
 class AssignmentsProvider extends ChangeNotifier {
   // ── State ────────────────────────────────────────────────────────────────
-  List<AssignmentModel> _assignments = [];
+  List<AssignmentModel> _familyAssignments = [];
+  List<AssignmentModel> _classHomework = [];
   bool _isLoading = false;
   String? _error;
   String? _familyId;
   String? _viewUid;
 
-  List<AssignmentModel> get assignments => _assignments;
+  /// Combined list: family assignments + class homework (deduped by id)
+  List<AssignmentModel> get assignments {
+    final ids = <String>{};
+    final combined = <AssignmentModel>[];
+    for (final a in [..._familyAssignments, ..._classHomework]) {
+      if (ids.add(a.id)) combined.add(a);
+    }
+    combined.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    return combined;
+  }
+
   bool get isLoading => _isLoading;
   String? get error => _error;
 
   StreamSubscription<QuerySnapshot>? _sub;
+  StreamSubscription<QuerySnapshot>? _classSub;
   late Box<String> _box;
   bool _hiveReady = false;
 
@@ -44,30 +57,29 @@ class AssignmentsProvider extends ChangeNotifier {
     _familyId = familyId;
     _viewUid = viewUid;
 
-    // Cancel any existing subscription.
+    // Cancel any existing subscriptions.
     await _sub?.cancel();
+    await _classSub?.cancel();
     _sub = null;
+    _classSub = null;
 
     _setLoading(true);
 
     // Hydrate from cache immediately so the UI has something to show.
     _loadFromCache(familyId);
 
-    // Subscribe to live Firestore stream.
+    // Subscribe to live Firestore stream (family/parent-created assignments).
     _sub = FirebaseFirestore.instance
         .collection('assignments')
         .where('familyId', isEqualTo: familyId)
         .snapshots()
         .listen(
           (snap) {
-            final list = snap.docs
-                .map((d) =>
-                    AssignmentModel.fromMap(d.data(), d.id))
-                .toList()
-              ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
-            _assignments = list;
+            _familyAssignments = snap.docs
+                .map((d) => AssignmentModel.fromMap(d.data(), d.id))
+                .toList();
             _error = null;
-            _saveToCache(familyId, list);
+            _saveToCache(familyId, assignments);
             _setLoading(false);
           },
           onError: (e) {
@@ -75,6 +87,105 @@ class AssignmentsProvider extends ChangeNotifier {
             _setLoading(false);
           },
         );
+
+    // If this is a student, also listen for class homework assigned to them.
+    if (viewUid != null) {
+      _loadClassHomeworkForStudent(viewUid);
+    }
+  }
+
+  /// Load homework from classes the student is enrolled in.
+  Future<void> _loadClassHomeworkForStudent(String studentUid) async {
+    try {
+      final db = FirebaseFirestore.instance;
+      // Get all classes the student is enrolled in
+      final classesSnap = await db
+          .collection('classes')
+          .where('enrolledUids', arrayContains: studentUid)
+          .get();
+      if (classesSnap.docs.isEmpty) return;
+
+      final List<AssignmentModel> hwList = [];
+
+      for (final classDoc in classesSnap.docs) {
+        final classId = classDoc.id;
+        final className = classDoc.data()['name'] as String? ?? 'Class';
+
+        // Fetch all weeks
+        final weeksSnap =
+            await db.collection('classes').doc(classId).collection('weeks').get();
+
+        for (final weekDoc in weeksSnap.docs) {
+          final weekId = weekDoc.id;
+          // Fetch homework for this week
+          final hwSnap = await db
+              .collection('classes')
+              .doc(classId)
+              .collection('weeks')
+              .doc(weekId)
+              .collection('homework')
+              .get();
+
+          for (final hwDoc in hwSnap.docs) {
+            final data = hwDoc.data();
+            if (data['hidden'] == true) continue; // skip hidden homework
+
+            // Check if student has submitted
+            AssignmentStatus status = AssignmentStatus.pending;
+            try {
+              final subSnap = await db
+                  .collection('classes')
+                  .doc(classId)
+                  .collection('weeks')
+                  .doc(weekId)
+                  .collection('homework')
+                  .doc(hwDoc.id)
+                  .collection('submissions')
+                  .where('studentUid', isEqualTo: studentUid)
+                  .limit(1)
+                  .get();
+              if (subSnap.docs.isNotEmpty) {
+                final subStatus =
+                    subSnap.docs.first.data()['status'] as String? ?? 'pending';
+                status = AssignmentModel.statusFromString(subStatus);
+              }
+            } catch (_) {}
+
+            final dueDate = data['dueDate'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    (data['dueDate'] as dynamic).millisecondsSinceEpoch)
+                : DateTime.now().add(const Duration(days: 7));
+
+            hwList.add(AssignmentModel(
+              id: 'class_${classId}_${hwDoc.id}',
+              title: data['title'] as String? ?? 'Homework',
+              description: data['description'] as String? ?? '',
+              courseName: className,
+              courseId: classId,
+              dueDate: dueDate,
+              status: status,
+              grade: null,
+              fromMoodle: false,
+              isOptional: false,
+              familyId: '',
+              createdAt: data['createdAt'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      (data['createdAt'] as dynamic).millisecondsSinceEpoch)
+                  : DateTime.now(),
+              fromClass: true,
+              classId: classId,
+              weekId: weekId,
+              homeworkId: hwDoc.id,
+            ));
+          }
+        }
+      }
+
+      _classHomework = hwList;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[AssignmentsProvider] Class homework load failed: $e');
+    }
   }
 
   // ── Toggle completion in place ───────────────────────────────────────────
@@ -85,28 +196,10 @@ class AssignmentsProvider extends ChangeNotifier {
             ? AssignmentStatus.submitted
             : AssignmentStatus.pending;
 
-    // Optimistic local update.
-    final idx = _assignments.indexWhere((a) => a.id == id);
+    // Optimistic local update (family assignments only; class hw handled via dashboard).
+    final idx = _familyAssignments.indexWhere((a) => a.id == id);
     if (idx != -1) {
-      final old = _assignments[idx];
-      _assignments[idx] = AssignmentModel(
-        id: old.id,
-        title: old.title,
-        description: old.description,
-        courseName: old.courseName,
-        courseId: old.courseId,
-        dueDate: old.dueDate,
-        status: newStatus,
-        grade: old.grade,
-        maxGrade: old.maxGrade,
-        submissionUrl: old.submissionUrl,
-        fromMoodle: old.fromMoodle,
-        isOptional: old.isOptional,
-        assignedTo: old.assignedTo,
-        familyId: old.familyId,
-        createdAt: old.createdAt,
-        seriesId: old.seriesId,
-      );
+      _familyAssignments[idx] = _familyAssignments[idx].copyWithStatus(newStatus);
       notifyListeners();
     }
 
@@ -119,7 +212,7 @@ class AssignmentsProvider extends ChangeNotifier {
     } catch (e) {
       // Roll back optimistic update on failure.
       if (idx != -1) {
-        _assignments[idx] = _assignments[idx].copyWithStatus(current);
+        _familyAssignments[idx] = _familyAssignments[idx].copyWithStatus(current);
         notifyListeners();
       }
       rethrow;
@@ -130,6 +223,7 @@ class AssignmentsProvider extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    _classSub?.cancel();
     super.dispose();
   }
 
@@ -145,11 +239,11 @@ class AssignmentsProvider extends ChangeNotifier {
       final raw = _box.get('assignments_$familyId');
       if (raw == null) return;
       final decoded = json.decode(raw) as List<dynamic>;
-      _assignments = decoded
+      _familyAssignments = decoded
           .map((m) => AssignmentModel.fromMap(m as Map<String, dynamic>,
               m['id'] as String? ?? ''))
-          .toList()
-        ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+          .where((a) => !a.fromClass) // cache only family assignments
+          .toList();
       notifyListeners();
     } catch (e) {
       debugPrint('[AssignmentsProvider] Cache read failed: $e');
@@ -159,7 +253,9 @@ class AssignmentsProvider extends ChangeNotifier {
   void _saveToCache(String familyId, List<AssignmentModel> list) {
     if (!_hiveReady) return;
     try {
-      final encoded = json.encode(list.map((a) => a.toCacheMap()).toList());
+      // Only cache family assignments (class hw is re-fetched on load)
+      final filtered = list.where((a) => !a.fromClass).toList();
+      final encoded = json.encode(filtered.map((a) => a.toCacheMap()).toList());
       _box.put('assignments_$familyId', encoded);
     } catch (e) {
       debugPrint('[AssignmentsProvider] Cache write failed: $e');
@@ -186,5 +282,9 @@ extension _AssignmentStatusCopy on AssignmentModel {
         familyId: familyId,
         createdAt: createdAt,
         seriesId: seriesId,
+        fromClass: fromClass,
+        classId: classId,
+        weekId: weekId,
+        homeworkId: homeworkId,
       );
 }

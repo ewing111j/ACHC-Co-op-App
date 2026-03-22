@@ -17,6 +17,8 @@ import '../../services/firestore_service.dart';
 import '../../services/moodle_service.dart';
 import '../../utils/app_theme.dart';
 import '../moodle/moodle_setup_screen.dart';
+import '../classes/class_dashboard_screen.dart';
+import '../../models/class_models.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UUID generator for series IDs
@@ -1127,7 +1129,10 @@ class _AssignmentCardState extends State<_AssignmentCard> {
                       ),
                       if (a.fromMoodle)
                         const _MoodleTag(),
+                      if (a.fromClass)
+                        _ClassTag(onTap: () => _openClassHomework(context, a)),
                       if (!a.fromMoodle &&
+                          !a.fromClass &&
                           (widget.user.isAdmin ||
                               widget.user.isParent))
                         _EditMenu(
@@ -1245,6 +1250,11 @@ class _AssignmentCardState extends State<_AssignmentCard> {
 
   void _toggleStatus() {
     final a = widget.assignment;
+    // Class homework is submitted via the class dashboard, not toggled here
+    if (a.fromClass) {
+      _openClassHomework(context, a);
+      return;
+    }
     // Use Provider for optimistic update + Firestore write.
     try {
       context.read<AssignmentsProvider>().toggleStatus(a.id, a.status);
@@ -1261,6 +1271,31 @@ class _AssignmentCardState extends State<_AssignmentCard> {
           .update({'status': newStatus.name});
     }
   }
+
+  Future<void> _openClassHomework(BuildContext context, AssignmentModel a) async {
+    if (a.classId == null) return;
+    // Fetch the class model and navigate to class dashboard
+    try {
+      final doc = await widget.db.collection('classes').doc(a.classId).get();
+      if (!doc.exists || !context.mounted) return;
+      final classModel = ClassModel.fromMap(doc.data()!, doc.id);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClassDashboardScreen(
+            classModel: classModel,
+            user: widget.user,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open class: $e'),
+              backgroundColor: AppTheme.error, behavior: SnackBarBehavior.floating));
+      }
+    }
+  }
 }
 
 class _MoodleTag extends StatelessWidget {
@@ -1275,6 +1310,33 @@ class _MoodleTag extends StatelessWidget {
           borderRadius: BorderRadius.circular(4)),
       child: const Text('Moodle',
           style: TextStyle(color: AppTheme.info, fontSize: 10)),
+    );
+  }
+}
+
+/// Tag shown on class-homework entries in the assignments feed.
+class _ClassTag extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ClassTag({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(left: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+            color: AppTheme.classesColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(4)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.menu_book, size: 10, color: AppTheme.classesColor),
+          const SizedBox(width: 3),
+          Text('Class',
+              style: TextStyle(color: AppTheme.classesColor, fontSize: 10,
+                  fontWeight: FontWeight.w600)),
+        ]),
+      ),
     );
   }
 }

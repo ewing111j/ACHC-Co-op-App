@@ -323,8 +323,8 @@ class SubmissionModel {
   final String? fileName;
   final DateTime submittedAt;
   final DateTime? gradedAt;
-  // Checklist item completion: index -> bool
-  final Map<int, bool> checklistDone;
+  // Checklist item completion: key is the item text (string), value is bool
+  final Map<String, bool> checklistDone;
 
   const SubmissionModel({
     required this.id,
@@ -353,10 +353,10 @@ class SubmissionModel {
 
   factory SubmissionModel.fromMap(Map<String, dynamic> map, String id) {
     final rawChecklist = map['checklistDone'] as Map? ?? {};
-    final checklistDone = <int, bool>{};
+    // Support both string-key (item text) and int-key (legacy index) formats
+    final checklistDone = <String, bool>{};
     rawChecklist.forEach((k, v) {
-      final idx = int.tryParse(k.toString());
-      if (idx != null) checklistDone[idx] = v as bool? ?? false;
+      checklistDone[k.toString()] = v as bool? ?? false;
     });
     return SubmissionModel(
       id: id,
@@ -384,7 +384,7 @@ class SubmissionModel {
 
   Map<String, dynamic> toMap() {
     final cl = <String, bool>{};
-    checklistDone.forEach((k, v) => cl[k.toString()] = v);
+    checklistDone.forEach((k, v) => cl[k] = v);
     return {
       'homeworkId': homeworkId,
       'classId': classId,
