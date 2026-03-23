@@ -22,9 +22,11 @@ class ClassDashboardScreen extends StatefulWidget {
   State<ClassDashboardScreen> createState() => _ClassDashboardScreenState();
 }
 
-class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
+class _ClassDashboardScreenState extends State<ClassDashboardScreen>
+    with SingleTickerProviderStateMixin {
   static const int _pageCenter = 5000;
   late final PageController _pageCtrl;
+  late final TabController _tabCtrl;
   final _db = FirebaseFirestore.instance;
   List<ClassWeekModel> _weeks = [];
   bool _weeksLoaded = false;
@@ -33,12 +35,14 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
   void initState() {
     super.initState();
     _pageCtrl = PageController(initialPage: _pageCenter);
+    _tabCtrl = TabController(length: 2, vsync: this);
     _loadWeeks();
   }
 
   @override
   void dispose() {
     _pageCtrl.dispose();
+    _tabCtrl.dispose();
     super.dispose();
   }
 
@@ -121,6 +125,13 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
                         classModel: cls, user: user))),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabCtrl,
+          tabs: const [
+            Tab(icon: Icon(Icons.calendar_view_week_outlined, size: 18), text: 'Weekly'),
+            Tab(icon: Icon(Icons.calendar_view_month_outlined, size: 18), text: 'Monthly'),
+          ],
+        ),
       ),
       body: Column(
         children: [
@@ -130,45 +141,34 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
           // ── Quick action row ─────────────────────────────────────
           _QuickActions(cls: cls, user: user),
           const Divider(height: 1),
-          // ── Week nav bar ─────────────────────────────────────────
-          if (_weeksLoaded)
-            _WeekNavBar(
-              pageCtrl: _pageCtrl,
-              pageCenter: _pageCenter,
-              weeks: _weeks,
-              weekForPage: _weekForPage,
-              canEdit: user.canEditClasses,
-              db: _db,
-              classId: cls.id,
-              onWeeksChanged: _loadWeeks,
-            ),
-          if (!_weeksLoaded)
-            const LinearProgressIndicator(
-                backgroundColor: AppTheme.surfaceVariant,
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(AppTheme.classesColor)),
-          AppTheme.goldDivider(),
-          // ── Week content ─────────────────────────────────────────
+          // ── Tab content ──────────────────────────────────────────
           Expanded(
-            child: _weeksLoaded
-                ? (_weeks.isEmpty
-                    ? _NoWeeks(canEdit: user.canEditClasses)
-                    : PageView.builder(
-                        controller: _pageCtrl,
-                        onPageChanged: (_) => setState(() {}),
-                        itemBuilder: (ctx, page) {
-                          final week = _weekForPage(page);
-                          if (week == null) return const SizedBox.shrink();
-                          return _WeekContent(
-                            week: week,
-                            classModel: cls,
-                            user: user,
-                            db: _db,
-                            color: color,
-                          );
-                        },
-                      ))
-                : const Center(child: CircularProgressIndicator()),
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [
+                // ── Weekly Tab ───────────────────────────────────
+                _WeeklyClassTab(
+                  weeks: _weeks,
+                  weeksLoaded: _weeksLoaded,
+                  pageCtrl: _pageCtrl,
+                  pageCenter: _pageCenter,
+                  weekForPage: _weekForPage,
+                  cls: cls,
+                  user: user,
+                  db: _db,
+                  color: color,
+                  onWeeksChanged: _loadWeeks,
+                ),
+                // ── Monthly Tab ──────────────────────────────────
+                _ClassMonthlyTab(
+                  weeks: _weeks,
+                  cls: cls,
+                  user: user,
+                  db: _db,
+                  color: color,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -194,6 +194,484 @@ class _ClassDashboardScreenState extends State<ClassDashboardScreen> {
               child: const Icon(Icons.add),
             )
           : null,
+    );
+  }
+}
+
+// ── Weekly Class Tab ──────────────────────────────────────────────────────────
+/// Wraps the week nav bar + PageView content that was previously inline.
+class _WeeklyClassTab extends StatelessWidget {
+  final List<ClassWeekModel> weeks;
+  final bool weeksLoaded;
+  final PageController pageCtrl;
+  final int pageCenter;
+  final ClassWeekModel? Function(int) weekForPage;
+  final ClassModel cls;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Color color;
+  final VoidCallback onWeeksChanged;
+
+  const _WeeklyClassTab({
+    required this.weeks,
+    required this.weeksLoaded,
+    required this.pageCtrl,
+    required this.pageCenter,
+    required this.weekForPage,
+    required this.cls,
+    required this.user,
+    required this.db,
+    required this.color,
+    required this.onWeeksChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        if (weeksLoaded)
+          _WeekNavBar(
+            pageCtrl: pageCtrl,
+            pageCenter: pageCenter,
+            weeks: weeks,
+            weekForPage: weekForPage,
+            canEdit: user.canEditClasses,
+            db: db,
+            classId: cls.id,
+            onWeeksChanged: onWeeksChanged,
+          ),
+        if (!weeksLoaded)
+          const LinearProgressIndicator(
+              backgroundColor: AppTheme.surfaceVariant,
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(AppTheme.classesColor)),
+        AppTheme.goldDivider(),
+        Expanded(
+          child: weeksLoaded
+              ? (weeks.isEmpty
+                  ? _NoWeeks(canEdit: user.canEditClasses)
+                  : PageView.builder(
+                      controller: pageCtrl,
+                      itemBuilder: (ctx, page) {
+                        final week = weekForPage(page);
+                        if (week == null) return const SizedBox.shrink();
+                        return _WeekContent(
+                          week: week,
+                          classModel: cls,
+                          user: user,
+                          db: db,
+                          color: color,
+                        );
+                      },
+                    ))
+              : const Center(child: CircularProgressIndicator()),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Class Monthly Tab ─────────────────────────────────────────────────────────
+/// 4-column monthly overview scoped to a single class's weeks.
+class _ClassMonthlyTab extends StatefulWidget {
+  final List<ClassWeekModel> weeks;
+  final ClassModel cls;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Color color;
+
+  const _ClassMonthlyTab({
+    required this.weeks,
+    required this.cls,
+    required this.user,
+    required this.db,
+    required this.color,
+  });
+
+  @override
+  State<_ClassMonthlyTab> createState() => _ClassMonthlyTabState();
+}
+
+class _ClassMonthlyTabState extends State<_ClassMonthlyTab> {
+  int _weekOffset = 0;
+
+  DateTime _weekStart(int relativeOffset) {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    return monday.add(Duration(days: (_weekOffset + relativeOffset) * 7));
+  }
+
+  /// Returns homework items for a given calendar week from the class weeks list
+  List<HomeworkModel> _hwForCalendarWeek(DateTime colStart) {
+    final colEnd = colStart.add(const Duration(days: 7));
+    final result = <HomeworkModel>[];
+    for (final week in widget.weeks) {
+      // Check if this class week overlaps with the calendar column
+      if (week.weekEnd.isBefore(colStart) || week.weekStart.isAfter(colEnd)) {
+        continue;
+      }
+      result.add(HomeworkModel(
+        id: week.id,
+        classId: widget.cls.id,
+        weekId: week.id,
+        title: week.displayLabel,
+        description: week.notes,
+        dueDate: week.weekEnd,
+        createdAt: week.weekStart,
+        itemType: 'hw',
+      ));
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cols = [-1, 0, 1, 2];
+    final isCurrentWeekVisible = _weekOffset == 0;
+    final clsColor = widget.color;
+
+    return Column(
+      children: [
+        // Navigation bar
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => setState(() => _weekOffset--),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: isCurrentWeekVisible
+                      ? null
+                      : () => setState(() => _weekOffset = 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Text(widget.cls.name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppTheme.textPrimary)),
+                        if (!isCurrentWeekVisible) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppTheme.navy.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('Today',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    color: AppTheme.navy,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                        ],
+                      ]),
+                      Text(
+                        '${DateFormat('MMM d').format(_weekStart(-1))} – ${DateFormat('MMM d').format(_weekStart(2).add(const Duration(days: 6)))}',
+                        style: const TextStyle(fontSize: 10, color: AppTheme.textHint),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => setState(() => _weekOffset++),
+              ),
+            ],
+          ),
+        ),
+        AppTheme.goldDivider(),
+        // Column headers
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            children: cols.map((offset) {
+              final start = _weekStart(offset);
+              final now = DateTime.now();
+              final colIsThisWeek = start.isBefore(now) &&
+                  start.add(const Duration(days: 7)).isAfter(now);
+              return Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: colIsThisWeek
+                        ? clsColor.withValues(alpha: 0.1)
+                        : AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: colIsThisWeek
+                          ? clsColor.withValues(alpha: 0.3)
+                          : AppTheme.cardBorder,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        colIsThisWeek ? 'This Week' : DateFormat('MMM d').format(start),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: colIsThisWeek ? clsColor : AppTheme.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (!colIsThisWeek)
+                        Text(
+                          DateFormat('MMM d').format(start.add(const Duration(days: 6))),
+                          style: const TextStyle(fontSize: 9, color: AppTheme.textHint),
+                          textAlign: TextAlign.center,
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        // Content grid — streams homework for each column
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: cols.map((offset) {
+                final start = _weekStart(offset);
+                final now = DateTime.now();
+                final colIsThisWeek = start.isBefore(now) &&
+                    start.add(const Duration(days: 7)).isAfter(now);
+                // Find class weeks that fall in this column
+                return Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: BoxDecoration(
+                      color: colIsThisWeek
+                          ? clsColor.withValues(alpha: 0.03)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: _ClassMonthlyColumn(
+                      colStart: start,
+                      weeks: widget.weeks,
+                      cls: widget.cls,
+                      user: widget.user,
+                      db: widget.db,
+                      color: clsColor,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Single column in the class monthly view — streams homework for a given week
+class _ClassMonthlyColumn extends StatelessWidget {
+  final DateTime colStart;
+  final List<ClassWeekModel> weeks;
+  final ClassModel cls;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Color color;
+
+  const _ClassMonthlyColumn({
+    required this.colStart,
+    required this.weeks,
+    required this.cls,
+    required this.user,
+    required this.db,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colEnd = colStart.add(const Duration(days: 7));
+    // Find class weeks that overlap this calendar column
+    final matchingWeeks = weeks.where((w) =>
+        !w.weekEnd.isBefore(colStart) && !w.weekStart.isAfter(colEnd)).toList();
+
+    if (matchingWeeks.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(6),
+        child: Text('—', textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: AppTheme.textHint)),
+      );
+    }
+
+    return Column(
+      children: matchingWeeks.map((week) =>
+        _ClassMonthlyWeekBlock(
+          week: week,
+          cls: cls,
+          user: user,
+          db: db,
+          color: color,
+        )).toList(),
+    );
+  }
+}
+
+/// Streams homework for a single class week in the monthly column
+class _ClassMonthlyWeekBlock extends StatelessWidget {
+  final ClassWeekModel week;
+  final ClassModel cls;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Color color;
+
+  const _ClassMonthlyWeekBlock({
+    required this.week,
+    required this.cls,
+    required this.user,
+    required this.db,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: db
+          .collection('classes').doc(cls.id)
+          .collection('weeks').doc(week.id)
+          .collection('homework')
+          .snapshots(),
+      builder: (ctx, snap) {
+        if (!snap.hasData) {
+          return const SizedBox(
+            height: 30,
+            child: Center(child: SizedBox(width: 12, height: 12,
+                child: CircularProgressIndicator(strokeWidth: 1.5))),
+          );
+        }
+        final docs = snap.data!.docs;
+        final hw = docs
+            .map((d) => HomeworkModel.fromMap(d.data() as Map<String, dynamic>, d.id))
+            .where((h) => user.canEditClasses || !h.isHidden)
+            .where((h) => !h.isContent) // content doesn't show in monthly grid
+            .toList()
+          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+
+        if (hw.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+            child: Row(children: [
+              Container(width: 3, height: 20, color: color.withValues(alpha: 0.3),
+                  margin: const EdgeInsets.only(right: 4)),
+              Expanded(child: Text(week.displayLabel,
+                  style: const TextStyle(fontSize: 8, color: AppTheme.textHint),
+                  maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ]),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Week label row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 2),
+              child: Row(children: [
+                Container(width: 3, height: 12, color: color,
+                    margin: const EdgeInsets.only(right: 4)),
+                Expanded(child: Text(week.displayLabel,
+                    style: TextStyle(fontSize: 8,
+                        fontWeight: FontWeight.w700, color: color),
+                    maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ]),
+            ),
+            ...hw.map((h) => _ClassMonthlyHwChip(
+                hw: h, cls: cls, week: week, user: user, db: db, color: color)),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A single homework chip in the class monthly view
+class _ClassMonthlyHwChip extends StatelessWidget {
+  final HomeworkModel hw;
+  final ClassModel cls;
+  final ClassWeekModel week;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Color color;
+
+  const _ClassMonthlyHwChip({
+    required this.hw, required this.cls, required this.week,
+    required this.user, required this.db, required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final typeColor = hw.isQuiz
+        ? AppTheme.classesColor
+        : hw.isTest
+            ? AppTheme.mandatoryRed
+            : color;
+
+    return GestureDetector(
+      onTap: () async {
+        if (!user.canEditClasses) {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkDetailSheet(
+              hw: hw, classModel: cls, week: week, user: user, db: db,
+            ),
+          );
+        } else {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkSheet(
+              classModel: cls, week: week, user: user, db: db, editHw: hw,
+            ),
+          );
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 3, left: 2, right: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+        decoration: BoxDecoration(
+          color: typeColor.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(5),
+          border: Border(left: BorderSide(color: typeColor, width: 3)),
+        ),
+        child: Row(children: [
+          Icon(hw.isQuiz
+              ? Icons.quiz_outlined
+              : hw.isTest
+                  ? Icons.article_outlined
+                  : Icons.assignment_outlined,
+              size: 9, color: typeColor),
+          const SizedBox(width: 3),
+          Expanded(
+            child: Text(hw.title,
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -844,6 +1322,23 @@ class _HomeworkCardState extends State<_HomeworkCard> {
 
     return GestureDetector(
       onTap: () async {
+        // Content items: open read-only viewer (no submission)
+        if (hw.isContent) {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkDetailSheet(
+              hw: hw,
+              classModel: widget.classModel,
+              week: widget.week,
+              user: widget.user,
+              db: widget.db,
+              existingSubmission: null,
+            ),
+          );
+          return;
+        }
         // Non-editors (students / enrolled parents) see submission view;
         // mentors/admins see the edit form
         if (!widget.user.canEditClasses) {

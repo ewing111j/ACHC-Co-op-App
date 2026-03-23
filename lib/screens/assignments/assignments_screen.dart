@@ -716,14 +716,7 @@ class _MonthlyTabState extends State<_MonthlyTab> {
                                     color: AppTheme.textHint)),
                           )
                         : Column(
-                            children: items
-                                .map((a) => _MonthlyAssignmentChip(
-                                      assignment: a,
-                                      user: widget.user,
-                                      db: widget.db,
-                                      kidNames: widget.kidNames,
-                                    ))
-                                .toList(),
+                            children: _buildGroupedChips(items),
                           ),
                   ),
                 );
@@ -733,6 +726,54 @@ class _MonthlyTabState extends State<_MonthlyTab> {
         ),
       ],
     );
+  }
+
+  /// Groups items by courseName and renders a labeled group header + chips.
+  /// Class homework (fromClass==true) is grouped under its course name;
+  /// personal tasks use 'Personal Tasks' as a fallback group.
+  List<Widget> _buildGroupedChips(List<AssignmentModel> items) {
+    // Build ordered map: courseName → items
+    final Map<String, List<AssignmentModel>> grouped = {};
+    for (final a in items) {
+      final key = a.courseName.isNotEmpty ? a.courseName : 'Tasks';
+      grouped.putIfAbsent(key, () => []).add(a);
+    }
+
+    final widgets = <Widget>[];
+    for (final entry in grouped.entries) {
+      final groupColor = entry.value.first.fromClass
+          ? AppTheme.classesColor
+          : AppTheme.assignmentsColor;
+      // Group header
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 5, bottom: 2, left: 2, right: 2),
+          child: Row(children: [
+            Container(width: 3, height: 11, color: groupColor,
+                margin: const EdgeInsets.only(right: 4)),
+            Expanded(
+              child: Text(entry.key,
+                  style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      color: groupColor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+        ),
+      );
+      // Chips
+      for (final a in entry.value) {
+        widgets.add(_MonthlyAssignmentChip(
+          assignment: a,
+          user: widget.user,
+          db: widget.db,
+          kidNames: widget.kidNames,
+        ));
+      }
+    }
+    return widgets;
   }
 }
 

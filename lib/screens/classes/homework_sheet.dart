@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../models/user_model.dart';
 import '../../models/class_models.dart';
 import '../../utils/app_theme.dart';
@@ -542,6 +543,7 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
   SubmissionModel? _sub;
   double? _gradeInput;
   final _feedbackCtrl = TextEditingController();
+  final _noteCtrl = TextEditingController(); // student submission note
 
   @override
   void initState() {
@@ -551,6 +553,7 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
     _fileUrl = _sub?.fileUrl;
     _fileName = _sub?.fileName;
     _feedbackCtrl.text = _sub?.feedback ?? '';
+    _noteCtrl.text = _sub?.submissionNote ?? '';
     // Init checklist: merge hw items with sub's done map
     final hwList = widget.hw.checklist;
     final doneMap = _sub?.checklistDone ?? {};
@@ -561,6 +564,7 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
   @override
   void dispose() {
     _feedbackCtrl.dispose();
+    _noteCtrl.dispose();
     super.dispose();
   }
 
@@ -614,6 +618,7 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
         'fileUrl': _fileUrl,
         'fileName': _fileName,
         'checklistDone': cl,
+        'submissionNote': _noteCtrl.text.trim(),
         'submittedAt': FieldValue.serverTimestamp(),
       };
 
@@ -677,6 +682,11 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
     final user = widget.user;
     final canGrade = user.canMentor || user.isAdmin;
     final isStudent = user.isStudent;
+
+    // Content items get a special read-only viewer
+    if (hw.isContent) {
+      return _ContentViewerSheet(hw: hw);
+    }
 
     return Container(
       decoration: const BoxDecoration(
@@ -760,7 +770,23 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
                   // File upload (student)
                   if (isStudent) ...[
                     const SizedBox(height: 16),
-                    const Text('Submission',
+                    const Text('Your Notes / Response',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.navy)),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _noteCtrl,
+                      maxLines: 5,
+                      decoration: const InputDecoration(
+                        hintText: 'Write your response, notes, or questions here…',
+                        alignLabelWithHint: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Attach File (optional)',
                         style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -802,6 +828,34 @@ class _HomeworkDetailSheetState extends State<HomeworkDetailSheet> {
                             fontWeight: FontWeight.w600,
                             color: AppTheme.navy)),
                     const SizedBox(height: 8),
+                    // Show student's submission note if present
+                    if (_sub!.submissionNote.isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.navy.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.navy.withValues(alpha: 0.15)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Student\'s Notes',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textSecondary,
+                                    letterSpacing: 0.5)),
+                            const SizedBox(height: 6),
+                            Text(_sub!.submissionNote,
+                                style: const TextStyle(
+                                    fontSize: 13, color: AppTheme.textPrimary)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     if (hw.gradingMode == 'percent')
                       TextFormField(
                         initialValue: _gradeInput?.toString(),
@@ -904,6 +958,224 @@ class _StatusBadge extends StatelessWidget {
       child: Text(label,
           style: TextStyle(
               fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+// ── Content Viewer Sheet (read-only, no submission) ──────────────────────────
+/// Shown when a student taps a "Content" item — displays text, video link, and URL.
+class _ContentViewerSheet extends StatelessWidget {
+  final HomeworkModel hw;
+  const _ContentViewerSheet({required this.hw});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.85,
+        maxChildSize: 0.95,
+        minChildSize: 0.4,
+        builder: (_, ctrl) => Column(
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppTheme.dividerColor,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            // Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.classesColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.menu_book_outlined, size: 13, color: AppTheme.classesColor),
+                      SizedBox(width: 4),
+                      Text('Content',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.classesColor)),
+                    ]),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(hw.title,
+                        style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.navy)),
+                  ),
+                ],
+              ),
+            ),
+            AppTheme.goldDivider(),
+            // Scrollable body
+            Expanded(
+              child: ListView(
+                controller: ctrl,
+                padding: const EdgeInsets.all(20),
+                children: [
+                  // Description / main text
+                  if (hw.description.isNotEmpty) ...[
+                    Text(hw.description,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.55,
+                            color: AppTheme.textPrimary)),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // Video URL
+                  if (hw.videoUrl != null && hw.videoUrl!.isNotEmpty) ...[
+                    const _SectionHeader(icon: Icons.ondemand_video_outlined, label: 'Video'),
+                    const SizedBox(height: 8),
+                    _LinkTile(
+                      url: hw.videoUrl!,
+                      label: 'Watch Video',
+                      icon: Icons.play_circle_outline,
+                      color: Colors.red.shade700,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Content / resource URL
+                  if (hw.contentUrl != null && hw.contentUrl!.isNotEmpty) ...[
+                    const _SectionHeader(icon: Icons.link_outlined, label: 'Resource Link'),
+                    const SizedBox(height: 8),
+                    _LinkTile(
+                      url: hw.contentUrl!,
+                      label: hw.contentUrl!,
+                      icon: Icons.open_in_new,
+                      color: AppTheme.classesColor,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Checklist (read-only reference)
+                  if (hw.checklist.isNotEmpty) ...[
+                    const _SectionHeader(icon: Icons.checklist_outlined, label: 'Reading / Task List'),
+                    const SizedBox(height: 8),
+                    ...hw.checklist.map((item) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.circle, size: 6, color: AppTheme.textSecondary),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(item,
+                                    style: const TextStyle(
+                                        fontSize: 14,
+                                        color: AppTheme.textPrimary,
+                                        height: 1.4)),
+                              ),
+                            ],
+                          ),
+                        )),
+                    const SizedBox(height: 16),
+                  ],
+
+                  const SizedBox(height: 40),
+                  // Close button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _SectionHeader({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      Icon(icon, size: 16, color: AppTheme.navy),
+      const SizedBox(width: 6),
+      Text(label,
+          style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.navy)),
+    ]);
+  }
+}
+
+class _LinkTile extends StatelessWidget {
+  final String url;
+  final String label;
+  final IconData icon;
+  final Color color;
+  const _LinkTile({required this.url, required this.label, required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () async {
+        final uri = Uri.tryParse(url);
+        if (uri != null && await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } else {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not open link')));
+          }
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: color,
+                      fontWeight: FontWeight.w600),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Icon(Icons.chevron_right, color: color.withValues(alpha: 0.5), size: 18),
+          ],
+        ),
+      ),
     );
   }
 }

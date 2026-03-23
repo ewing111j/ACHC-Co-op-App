@@ -368,6 +368,8 @@ class SubmissionModel {
   final DateTime? gradedAt;
   // Checklist item completion: key is the item text (string), value is bool
   final Map<String, bool> checklistDone;
+  /// Optional note/text the student writes when submitting
+  final String submissionNote;
 
   const SubmissionModel({
     required this.id,
@@ -384,6 +386,7 @@ class SubmissionModel {
     required this.submittedAt,
     this.gradedAt,
     this.checklistDone = const {},
+    this.submissionNote = '',
   });
 
   bool get isComplete =>
@@ -422,6 +425,7 @@ class SubmissionModel {
               (map['gradedAt'] as dynamic).millisecondsSinceEpoch)
           : null,
       checklistDone: checklistDone,
+      submissionNote: map['submissionNote'] as String? ?? '',
     );
   }
 
@@ -442,6 +446,7 @@ class SubmissionModel {
       'submittedAt': Timestamp.fromDate(submittedAt),
       'gradedAt': gradedAt != null ? Timestamp.fromDate(gradedAt!) : null,
       'checklistDone': cl,
+      'submissionNote': submissionNote,
     };
   }
 }

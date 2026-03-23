@@ -896,6 +896,28 @@ class _SubmissionTileState extends State<_SubmissionTile> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Student submission note
+                  if (sub.submissionNote.isNotEmpty) ...[
+                    const Text('Student\'s Notes',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.navy)),
+                    const SizedBox(height: 4),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.navy.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: AppTheme.navy.withValues(alpha: 0.15)),
+                      ),
+                      child: Text(sub.submissionNote,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppTheme.textPrimary)),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   // Checklist items if any
                   if (widget.hw.checklist.isNotEmpty) ...[
                     const Text('Checklist',
