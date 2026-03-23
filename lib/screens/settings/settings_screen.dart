@@ -752,7 +752,7 @@ class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _NotifItem('Assignments', Icons.assignment_outlined,
+      _NotifItem('Homework', Icons.assignment_outlined,
           AppTheme.assignmentsColor, NotificationPrefsService.keyAssignments),
       _NotifItem('Messages', Icons.chat_bubble_outline,
           AppTheme.messagesColor, NotificationPrefsService.keyMessages),

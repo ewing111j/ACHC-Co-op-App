@@ -180,7 +180,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
       build: (pw.Context ctx) => [
         pw.Header(
             level: 0,
-            child: pw.Text('Assignments – $studentName',
+            child: pw.Text('Homework – $studentName',
                 style: pw.TextStyle(
                     fontSize: 18, fontWeight: pw.FontWeight.bold))),
         pw.SizedBox(height: 8),
@@ -238,7 +238,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     ));
     await Printing.layoutPdf(
         onLayout: (_) async => doc.save(),
-        name: 'Assignments_$studentName.pdf');
+        name: 'Homework_$studentName.pdf');
   }
 
   // ── Build ────────────────────────────────────────────────────────
@@ -260,7 +260,7 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Assignments'),
+        title: const Text('Homework'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () => Navigator.pop(context),

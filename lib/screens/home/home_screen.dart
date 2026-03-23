@@ -479,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<_FeatureItem> _features(UserModel user) {
     if (user.isStudent) {
       return [
-        _FeatureItem('Assignments', Icons.assignment_outlined,
+        _FeatureItem('Homework', Icons.assignment_outlined,
           AppTheme.assignmentsColor, const AssignmentsScreen(),
           notifKey: NotificationPrefsService.keyAssignments,
           seenKey: 'assignments',
@@ -506,7 +506,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
     }
     return [
-      _FeatureItem('Assignments', Icons.assignment_outlined,
+      _FeatureItem('Homework', Icons.assignment_outlined,
         AppTheme.assignmentsColor, const AssignmentsScreen(),
         notifKey: NotificationPrefsService.keyAssignments,
         seenKey: 'assignments',
@@ -875,7 +875,7 @@ class _NotifSettingsSheetState extends State<_NotifSettingsSheet> {
   @override
   Widget build(BuildContext context) {
     final items = [
-      _NotifItem('Assignments', Icons.assignment_outlined,
+      _NotifItem('Homework', Icons.assignment_outlined,
           AppTheme.assignmentsColor, NotificationPrefsService.keyAssignments),
       _NotifItem('Messages', Icons.chat_bubble_outline,
           AppTheme.messagesColor, NotificationPrefsService.keyMessages),
