@@ -19,6 +19,7 @@ class AssignmentsProvider extends ChangeNotifier {
   String? _error;
   String? _familyId;
   String? _viewUid;
+  List<String> _kidUids = []; // for parent: all kid uids to load class hw
 
   /// Combined list: family assignments + class homework (deduped by id)
   List<AssignmentModel> get assignments {
@@ -53,22 +54,29 @@ class AssignmentsProvider extends ChangeNotifier {
 
   // ── Refresh class homework on demand (call when returning to screen) ─────
   Future<void> refreshClassHomework() async {
-    if (_viewUid != null) {
-      await _loadClassHomeworkForStudent(_viewUid!);
+    if (_kidUids.isNotEmpty) {
+      await _loadClassHomeworkForUids(_kidUids);
+    } else if (_viewUid != null) {
+      await _loadClassHomeworkForUids([_viewUid!]);
     }
   }
 
   // ── Load (subscribe to Firestore + hydrate from cache on first frame) ────
-  Future<void> load(String familyId, String? viewUid) async {
-    if (_familyId == familyId && _viewUid == viewUid) {
+  /// [kidUids] — when the viewer is a parent/admin, pass their kids' uids so
+  /// class homework loads for each enrolled child.
+  Future<void> load(String familyId, String? viewUid, {List<String> kidUids = const []}) async {
+    final effectiveKidUids = kidUids.isNotEmpty ? kidUids : (viewUid != null ? [viewUid] : <String>[]);
+    if (_familyId == familyId && _viewUid == viewUid &&
+        _listEquals(_kidUids, effectiveKidUids)) {
       // Same params: still refresh class homework in case new HW was added
-      if (viewUid != null) {
-        _loadClassHomeworkForStudent(viewUid); // fire-and-forget
+      if (effectiveKidUids.isNotEmpty) {
+        _loadClassHomeworkForUids(effectiveKidUids); // fire-and-forget
       }
       return;
     }
     _familyId = familyId;
     _viewUid = viewUid;
+    _kidUids = effectiveKidUids;
 
     // Cancel any existing subscriptions.
     await _sub?.cancel();
@@ -101,14 +109,32 @@ class AssignmentsProvider extends ChangeNotifier {
           },
         );
 
-    // If this is a student, also listen for class homework assigned to them.
-    if (viewUid != null) {
-      _loadClassHomeworkForStudent(viewUid);
+    // If this is a student or parent viewing kids, also load class homework.
+    if (_kidUids.isNotEmpty) {
+      _loadClassHomeworkForUids(_kidUids);
     }
+  }
+
+  /// Load homework for all given student uids (student's own, or parent's kids).
+  Future<void> _loadClassHomeworkForUids(List<String> uids) async {
+    final List<AssignmentModel> merged = [];
+    for (final uid in uids) {
+      final hw = await _fetchHomeworkForStudent(uid);
+      // Dedupe by id
+      final existing = {for (final a in merged) a.id};
+      merged.addAll(hw.where((a) => !existing.contains(a.id)));
+    }
+    _classHomework = merged;
+    notifyListeners();
   }
 
   /// Load homework from classes the student is enrolled in.
   Future<void> _loadClassHomeworkForStudent(String studentUid) async {
+    _classHomework = await _fetchHomeworkForStudent(studentUid);
+    notifyListeners();
+  }
+
+  Future<List<AssignmentModel>> _fetchHomeworkForStudent(String studentUid) async {
     try {
       final db = FirebaseFirestore.instance;
       // Get all classes the student is enrolled in
@@ -116,7 +142,7 @@ class AssignmentsProvider extends ChangeNotifier {
           .collection('classes')
           .where('enrolledUids', arrayContains: studentUid)
           .get();
-      if (classesSnap.docs.isEmpty) return;
+      if (classesSnap.docs.isEmpty) return [];
 
       final List<AssignmentModel> hwList = [];
 
@@ -216,10 +242,10 @@ class AssignmentsProvider extends ChangeNotifier {
         }
       }
 
-      _classHomework = hwList;
-      notifyListeners();
+      return hwList;
     } catch (e) {
       debugPrint('[AssignmentsProvider] Class homework load failed: $e');
+      return [];
     }
   }
 
@@ -260,6 +286,14 @@ class AssignmentsProvider extends ChangeNotifier {
     _sub?.cancel();
     _classSub?.cancel();
     super.dispose();
+  }
+
+  static bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────

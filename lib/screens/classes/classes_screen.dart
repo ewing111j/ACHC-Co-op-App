@@ -87,45 +87,10 @@ class _ClassesScreenState extends State<ClassesScreen> {
           ),
           AppTheme.goldDivider(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _buildQuery(user),
-              builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snap.hasError) {
-                  return Center(child: Text('Error: ${snap.error}',
-                      style: const TextStyle(color: AppTheme.error)));
-                }
-                var classes = (snap.data?.docs ?? [])
-                    .map((d) => ClassModel.fromMap(d.data() as Map<String, dynamic>, d.id))
-                    .where((c) => !c.isArchived)
-                    .toList();
-                if (_query.isNotEmpty) {
-                  classes = classes
-                      .where((c) =>
-                          c.name.toLowerCase().contains(_query) ||
-                          c.shortname.toLowerCase().contains(_query))
-                      .toList();
-                }
-                classes.sort((a, b) => a.name.compareTo(b.name));
-                if (classes.isEmpty) {
-                  return _EmptyClasses(canAdd: user.canEditClasses || user.isAdmin);
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: classes.length,
-                  itemBuilder: (ctx, i) => _ClassCard(
-                    cls: classes[i],
-                    user: user,
-                    db: _db,
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => ClassDashboardScreen(
-                                classModel: classes[i], user: user))),
-                  ),
-                );
-              },
+            child: _ClassListBody(
+              user: user,
+              db: _db,
+              query: _query,
             ),
           ),
         ],
@@ -152,13 +117,161 @@ class _ClassesScreenState extends State<ClassesScreen> {
     if (user.canMentor) {
       return col.where('mentorUids', arrayContains: user.uid).snapshots();
     }
-    // Student or parent: see enrolled classes
-    final uid = user.isStudent ? user.uid : null;
-    if (uid != null) {
-      return col.where('enrolledUids', arrayContains: uid).snapshots();
+    // Student: query by their own uid
+    if (user.isStudent) {
+      return col.where('enrolledUids', arrayContains: user.uid).snapshots();
     }
-    // Parent: show all (filter by kids happens in dashboard)
-    return col.snapshots();
+    // Parent: query by first kid uid (Firestore limitation — no multi-value
+    // arrayContains); we handle multi-kid merging in the FutureBuilder below.
+    // Fall back to the reactive stream for the first kid; if parent has kids,
+    // use the first one as the primary stream — _mergeParentClasses() handles all.
+    if (user.kidUids.isNotEmpty) {
+      return col.where('enrolledUids', arrayContains: user.kidUids.first).snapshots();
+    }
+    // Parent with no kids yet — return empty stream
+    return col.where('isArchived', isEqualTo: false).limit(0).snapshots();
+  }
+}
+
+// ── Class List Body ───────────────────────────────────────────────────────────
+/// Handles both stream-based (student/mentor/admin) and future-based (parent
+/// with multiple kids) class list loading.
+class _ClassListBody extends StatefulWidget {
+  final UserModel user;
+  final FirebaseFirestore db;
+  final String query;
+
+  const _ClassListBody({
+    required this.user,
+    required this.db,
+    required this.query,
+  });
+
+  @override
+  State<_ClassListBody> createState() => _ClassListBodyState();
+}
+
+class _ClassListBodyState extends State<_ClassListBody> {
+  // For parent with multiple kids we use a Future that fetches and merges
+  List<ClassModel>? _parentClasses;
+  bool _parentLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = widget.user;
+    if (user.isParent && user.kidUids.length > 1) {
+      _loadAllKidsClasses();
+    }
+  }
+
+  Future<void> _loadAllKidsClasses() async {
+    if (mounted) setState(() => _parentLoading = true);
+    try {
+      final col = widget.db.collection('classes');
+      final Map<String, ClassModel> seen = {};
+      for (final kidUid in widget.user.kidUids) {
+        final snap = await col
+            .where('enrolledUids', arrayContains: kidUid)
+            .get();
+        for (final d in snap.docs) {
+          final cls = ClassModel.fromMap(d.data() as Map<String, dynamic>, d.id);
+          if (!cls.isArchived) seen[cls.id] = cls;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _parentClasses = seen.values.toList()
+            ..sort((a, b) => a.name.compareTo(b.name));
+          _parentLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _parentLoading = false);
+    }
+  }
+
+  Widget _buildList(List<ClassModel> all) {
+    var classes = all.where((c) => !c.isArchived).toList();
+    if (widget.query.isNotEmpty) {
+      classes = classes
+          .where((c) =>
+              c.name.toLowerCase().contains(widget.query) ||
+              c.shortname.toLowerCase().contains(widget.query))
+          .toList();
+    }
+    classes.sort((a, b) => a.name.compareTo(b.name));
+    if (classes.isEmpty) {
+      return _EmptyClasses(
+          canAdd: widget.user.canEditClasses || widget.user.isAdmin);
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: classes.length,
+      itemBuilder: (ctx, i) => _ClassCard(
+        cls: classes[i],
+        user: widget.user,
+        db: widget.db,
+        onTap: () => Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => ClassDashboardScreen(
+                classModel: classes[i], user: widget.user),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = widget.user;
+
+    // Parent with multiple kids: use pre-fetched merged list
+    if (user.isParent && user.kidUids.length > 1) {
+      if (_parentLoading || _parentClasses == null) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      return _buildList(_parentClasses!);
+    }
+
+    // Everyone else (single-kid parent included): use stream
+    final col = widget.db.collection('classes');
+    Stream<QuerySnapshot> stream;
+    if (user.isAdmin) {
+      stream = col.snapshots();
+    } else if (user.canMentor) {
+      stream = col.where('mentorUids', arrayContains: user.uid).snapshots();
+    } else if (user.isStudent) {
+      stream = col.where('enrolledUids', arrayContains: user.uid).snapshots();
+    } else if (user.isParent && user.kidUids.isNotEmpty) {
+      // Single kid parent — stream classes for their one kid
+      stream = col
+          .where('enrolledUids', arrayContains: user.kidUids.first)
+          .snapshots();
+    } else {
+      // Parent with no kids yet
+      stream = col.where('isArchived', isEqualTo: false).limit(0).snapshots();
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: stream,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError) {
+          return Center(
+              child: Text('Error: ${snap.error}',
+                  style: const TextStyle(color: AppTheme.error)));
+        }
+        final classes = (snap.data?.docs ?? [])
+            .map((d) =>
+                ClassModel.fromMap(d.data() as Map<String, dynamic>, d.id))
+            .toList();
+        return _buildList(classes);
+      },
+    );
   }
 }
 
