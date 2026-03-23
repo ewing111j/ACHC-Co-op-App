@@ -947,6 +947,28 @@ class _HomeworkCardState extends State<_HomeworkCard> {
                         if (hw.isHidden)
                           const Icon(Icons.visibility_off_outlined,
                               size: 14, color: AppTheme.textHint),
+                        // Item type badge (quiz/test)
+                        if (hw.isQuiz || hw.isTest)
+                          Container(
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: hw.isQuiz
+                                  ? AppTheme.classesColor.withValues(alpha: 0.12)
+                                  : AppTheme.mandatoryRed.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              hw.isQuiz ? 'Quiz' : 'Test',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: hw.isQuiz
+                                    ? AppTheme.classesColor
+                                    : AppTheme.mandatoryRed,
+                              ),
+                            ),
+                          ),
                         // Grade badge
                         if (_submission?.grade != null)
                           _GradeBadge(
@@ -978,21 +1000,36 @@ class _HomeworkCardState extends State<_HomeworkCard> {
                     ],
                     if (hw.checklist.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      ...hw.checklist.take(3).map((item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Row(children: [
-                              const Icon(Icons.radio_button_unchecked,
-                                  size: 12, color: AppTheme.textHint),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                  child: Text(item,
-                                      style: const TextStyle(
-                                          fontSize: 11,
-                                          color: AppTheme.textSecondary),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis)),
-                            ]),
-                          )),
+                      ...hw.checklist.take(3).map((item) {
+                        final checked = _submission?.checklistDone[item] ?? false;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Row(children: [
+                            Icon(
+                              checked
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              size: 12,
+                              color: checked
+                                  ? AppTheme.optionalGreen
+                                  : AppTheme.textHint,
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                                child: Text(item,
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: checked
+                                            ? AppTheme.textHint
+                                            : AppTheme.textSecondary,
+                                        decoration: checked
+                                            ? TextDecoration.lineThrough
+                                            : null),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis)),
+                          ]),
+                        );
+                      }),
                       if (hw.checklist.length > 3)
                         Text('+${hw.checklist.length - 3} more…',
                             style: const TextStyle(

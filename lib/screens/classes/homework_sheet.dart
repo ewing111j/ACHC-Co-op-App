@@ -40,8 +40,11 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
   final _descCtrl = TextEditingController();
   final _maxPtsCtrl = TextEditingController();
   final _checklistCtrl = TextEditingController();
+  final _contentUrlCtrl = TextEditingController();
+  final _videoUrlCtrl = TextEditingController();
   DateTime? _dueDate;
   String _gradingMode = 'complete'; // 'complete' | 'percent'
+  String _itemType = 'hw'; // 'hw' | 'quiz' | 'test' | 'content'
   List<String> _checklist = [];
   bool _saving = false;
   bool _isEdit = false;
@@ -56,8 +59,11 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
       _descCtrl.text = hw.description;
       _dueDate = hw.dueDate;
       _gradingMode = hw.gradingMode;
+      _itemType = hw.itemType.isEmpty ? 'hw' : hw.itemType;
       _checklist = List<String>.from(hw.checklist);
       if (hw.maxPoints != null) _maxPtsCtrl.text = hw.maxPoints!.toString();
+      if (hw.contentUrl != null) _contentUrlCtrl.text = hw.contentUrl!;
+      if (hw.videoUrl != null) _videoUrlCtrl.text = hw.videoUrl!;
     } else {
       _dueDate = widget.week.weekEnd;
       _gradingMode = widget.classModel.gradingMode;
@@ -70,6 +76,8 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
     _descCtrl.dispose();
     _maxPtsCtrl.dispose();
     _checklistCtrl.dispose();
+    _contentUrlCtrl.dispose();
+    _videoUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -111,15 +119,22 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
           ? double.tryParse(_maxPtsCtrl.text)
           : null;
 
+      final contentUrl = _contentUrlCtrl.text.trim();
+      final videoUrl = _videoUrlCtrl.text.trim();
+      final isContent = _itemType == 'content';
+
       final data = <String, dynamic>{
         'title': _titleCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'classId': widget.classModel.id,
         'weekId': widget.week.id,
         'dueDate': Timestamp.fromDate(_dueDate!),
-        'gradingMode': _gradingMode,
-        'maxPoints': maxPts,
+        'gradingMode': isContent ? 'complete' : _gradingMode,
+        'maxPoints': (!isContent) ? maxPts : null,
         'checklist': _checklist,
+        'itemType': _itemType,
+        if (contentUrl.isNotEmpty) 'contentUrl': contentUrl,
+        if (videoUrl.isNotEmpty) 'videoUrl': videoUrl,
         'order': _isEdit ? widget.editHw!.order : DateTime.now().millisecondsSinceEpoch,
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -133,7 +148,11 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
 
       if (mounted) {
         Navigator.pop(context);
-        _snack(_isEdit ? 'Homework updated' : 'Homework added');
+        final typeLabel = _itemType == 'content' ? 'Content'
+            : _itemType == 'quiz' ? 'Quiz'
+            : _itemType == 'test' ? 'Test'
+            : 'Homework';
+        _snack(_isEdit ? '$typeLabel updated' : '$typeLabel added');
       }
     } catch (e) {
       _snack('Error saving homework: $e', error: true);
@@ -219,7 +238,9 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
                   children: [
                     Expanded(
                       child: Text(
-                        _isEdit ? 'Edit Homework' : 'Add Homework',
+                        _isEdit
+                            ? 'Edit ${_itemType == 'content' ? 'Content' : _itemType == 'quiz' ? 'Quiz' : _itemType == 'test' ? 'Test' : 'Homework'}'
+                            : 'Add Item',
                         style: const TextStyle(
                             fontSize: 18, fontWeight: FontWeight.bold,
                             color: AppTheme.navy),
@@ -240,6 +261,70 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
                   controller: ctrl,
                   padding: const EdgeInsets.all(20),
                   children: [
+                    // ── Item Type Selector ──────────────────────────
+                    const Text('Item Type',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.navy)),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _TypeChip(
+                            label: 'Homework',
+                            icon: Icons.book_outlined,
+                            value: 'hw',
+                            selected: _itemType == 'hw',
+                            color: AppTheme.assignmentsColor,
+                            onTap: () => setState(() {
+                              _itemType = 'hw';
+                              if (_gradingMode == 'complete' && widget.classModel.gradingMode == 'percent') {
+                                _gradingMode = 'percent';
+                              }
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          _TypeChip(
+                            label: 'Quiz',
+                            icon: Icons.quiz_outlined,
+                            value: 'quiz',
+                            selected: _itemType == 'quiz',
+                            color: AppTheme.classesColor,
+                            onTap: () => setState(() {
+                              _itemType = 'quiz';
+                              _gradingMode = 'percent';
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          _TypeChip(
+                            label: 'Test',
+                            icon: Icons.fact_check_outlined,
+                            value: 'test',
+                            selected: _itemType == 'test',
+                            color: AppTheme.mandatoryRed,
+                            onTap: () => setState(() {
+                              _itemType = 'test';
+                              _gradingMode = 'percent';
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          _TypeChip(
+                            label: 'Content',
+                            icon: Icons.article_outlined,
+                            value: 'content',
+                            selected: _itemType == 'content',
+                            color: Colors.teal,
+                            onTap: () => setState(() {
+                              _itemType = 'content';
+                              _gradingMode = 'complete';
+                            }),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     // Title
                     TextFormField(
                       controller: _titleCtrl,
@@ -284,41 +369,73 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    // Grading mode
-                    Row(
-                      children: [
-                        const Icon(Icons.grade_outlined, size: 18, color: AppTheme.textSecondary),
-                        const SizedBox(width: 8),
-                        const Text('Grading Mode:',
-                            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
-                        const SizedBox(width: 12),
-                        ChoiceChip(
-                          label: const Text('Complete/Incomplete'),
-                          selected: _gradingMode == 'complete',
-                          onSelected: (_) => setState(() => _gradingMode = 'complete'),
-                          selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
-                        ),
-                        const SizedBox(width: 8),
-                        ChoiceChip(
-                          label: const Text('Percentage'),
-                          selected: _gradingMode == 'percent',
-                          onSelected: (_) => setState(() => _gradingMode = 'percent'),
-                          selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
+                    // Grading mode (not for content)
+                    if (_itemType != 'content') ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.grade_outlined, size: 18, color: AppTheme.textSecondary),
+                          const SizedBox(width: 8),
+                          const Text('Grading:',
+                              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary)),
+                          const SizedBox(width: 12),
+                          ChoiceChip(
+                            label: const Text('Complete'),
+                            selected: _gradingMode == 'complete',
+                            onSelected: (_) => setState(() => _gradingMode = 'complete'),
+                            selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('Percentage'),
+                            selected: _gradingMode == 'percent',
+                            onSelected: (_) => setState(() => _gradingMode = 'percent'),
+                            selectedColor: AppTheme.classesColor.withValues(alpha: 0.2),
+                          ),
+                        ],
+                      ),
+                      if (_gradingMode == 'percent') ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _maxPtsCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Max Points (optional)',
+                            prefixIcon: Icon(Icons.score, size: 18),
+                          ),
                         ),
                       ],
-                    ),
-                    if (_gradingMode == 'percent') ...[
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _maxPtsCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Max Points (optional)',
-                          prefixIcon: Icon(Icons.score, size: 18),
-                        ),
-                      ),
                     ],
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 14),
+                    // Content URL fields (for content type)
+                    if (_itemType == 'content') ...[
+                      const Text('Content Link (optional)',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.navy)),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _contentUrlCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'https://…',
+                          prefixIcon: Icon(Icons.link, size: 18),
+                          labelText: 'Link / URL',
+                        ),
+                        keyboardType: TextInputType.url,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _videoUrlCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'YouTube embed URL…',
+                          prefixIcon: Icon(Icons.video_library_outlined, size: 18),
+                          labelText: 'Video URL (embed)',
+                        ),
+                        keyboardType: TextInputType.url,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    const SizedBox(height: 6),
                     // Checklist builder
                     const Text('Checklist Items (optional)',
                         style: TextStyle(
@@ -370,7 +487,11 @@ class _HomeworkSheetState extends State<HomeworkSheet> {
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.save_outlined),
-                        label: Text(_isEdit ? 'Save Changes' : 'Add Homework'),
+                        label: Text(_isEdit ? 'Save Changes'
+                            : _itemType == 'content' ? 'Add Content'
+                            : _itemType == 'quiz' ? 'Add Quiz'
+                            : _itemType == 'test' ? 'Add Test'
+                            : 'Add Homework'),
                         style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.navy,
                             foregroundColor: Colors.white,
@@ -783,6 +904,52 @@ class _StatusBadge extends StatelessWidget {
       child: Text(label,
           style: TextStyle(
               fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+// ── Item type chip for HomeworkSheet ─────────────────────────────────────────
+class _TypeChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final String value;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+  const _TypeChip({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.15) : AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? color : AppTheme.cardBorder,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 16, color: selected ? color : AppTheme.textSecondary),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? color : AppTheme.textSecondary)),
+        ]),
+      ),
     );
   }
 }

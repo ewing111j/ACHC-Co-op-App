@@ -29,6 +29,9 @@ class _AddClassSheetState extends State<AddClassSheet>
   String _gradingMode = 'complete';
   bool _gradebookSimple = false;
   bool _saving = false;
+  double _weightHw = 40;
+  double _weightQuiz = 20;
+  double _weightTest = 40;
 
   bool get _isEdit => widget.editClass != null;
 
@@ -44,6 +47,9 @@ class _AddClassSheetState extends State<AddClassSheet>
       _colorValue = c.colorValue;
       _gradingMode = c.gradingMode;
       _gradebookSimple = c.gradebookSimple;
+      _weightHw = c.weightHw;
+      _weightQuiz = c.weightQuiz;
+      _weightTest = c.weightTest;
     }
   }
 
@@ -141,6 +147,9 @@ class _AddClassSheetState extends State<AddClassSheet>
           'colorValue': _colorValue,
           'gradingMode': _gradingMode,
           'gradebookSimple': _gradebookSimple,
+          'weightHw': _weightHw,
+          'weightQuiz': _weightQuiz,
+          'weightTest': _weightTest,
           if (_startDate != null) 'startDate': Timestamp.fromDate(_startDate!),
         });
       } else {
@@ -159,6 +168,9 @@ class _AddClassSheetState extends State<AddClassSheet>
           'gradeB': 85.0,
           'gradeC': 77.0,
           'gradeD': 70.0,
+          'weightHw': _weightHw,
+          'weightQuiz': _weightQuiz,
+          'weightTest': _weightTest,
           'startDate':
               _startDate != null ? Timestamp.fromDate(_startDate!) : null,
           'schoolYearId': '${now.year}-${now.year + 1}',
@@ -345,6 +357,43 @@ class _DetailsTab extends StatelessWidget {
             value: s._gradebookSimple,
             activeColor: AppTheme.classesColor,
             onChanged: (v) => s.setState(() => s._gradebookSimple = v ?? false),
+          ),
+          const SizedBox(height: 14),
+          const Divider(),
+          const Text('Grade Category Weights',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textSecondary)),
+          const SizedBox(height: 4),
+          Text(
+            'Total: ${(s._weightHw + s._weightQuiz + s._weightTest).round()}%  '
+            '(should equal 100%)',
+            style: TextStyle(
+              fontSize: 11,
+              color: (s._weightHw + s._weightQuiz + s._weightTest).round() == 100
+                  ? AppTheme.optionalGreen
+                  : AppTheme.error,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _WeightSlider(
+            label: 'Homework',
+            value: s._weightHw,
+            color: AppTheme.assignmentsColor,
+            onChanged: (v) => s.setState(() => s._weightHw = v),
+          ),
+          _WeightSlider(
+            label: 'Quizzes',
+            value: s._weightQuiz,
+            color: AppTheme.classesColor,
+            onChanged: (v) => s.setState(() => s._weightQuiz = v),
+          ),
+          _WeightSlider(
+            label: 'Tests',
+            value: s._weightTest,
+            color: AppTheme.mandatoryRed,
+            onChanged: (v) => s.setState(() => s._weightTest = v),
           ),
           const SizedBox(height: 16),
           SizedBox(
@@ -1098,5 +1147,51 @@ class _StudentList extends StatelessWidget {
     }
     result.sort((a, b) => a['name']!.compareTo(b['name']!));
     return result;
+  }
+}
+
+// ── Weight Slider ─────────────────────────────────────────────────────────────
+class _WeightSlider extends StatelessWidget {
+  final String label;
+  final double value;
+  final Color color;
+  final void Function(double) onChanged;
+  const _WeightSlider({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      SizedBox(
+        width: 70,
+        child: Text(label,
+            style: const TextStyle(
+                fontSize: 12, color: AppTheme.textSecondary)),
+      ),
+      Expanded(
+        child: Slider(
+          value: value.clamp(0, 100),
+          min: 0,
+          max: 100,
+          divisions: 20,
+          activeColor: color,
+          label: '${value.round()}%',
+          onChanged: onChanged,
+        ),
+      ),
+      SizedBox(
+        width: 38,
+        child: Text('${value.round()}%',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color)),
+      ),
+    ]);
   }
 }

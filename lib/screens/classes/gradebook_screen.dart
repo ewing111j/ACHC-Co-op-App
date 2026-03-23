@@ -64,7 +64,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
           ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
         allHw.addAll(sorted);
       }
-      _allHomework = allHw;
+      _allHomework = allHw.where((h) => !h.isContent).toList();
 
       // Determine which student UIDs to show
       final allStudentUids = cls.enrolledUids;
@@ -107,41 +107,87 @@ class _GradebookScreenState extends State<GradebookScreen> {
 
       // Build per-student rows
       final rows = <Map<String, dynamic>>[];
+      // Separate HW by type (exclude content items from grading)
+      final gradableHw = allHw.where((h) => !h.isContent).toList();
+      final hwItems = gradableHw.where((h) => h.isHw).toList();
+      final quizItems = gradableHw.where((h) => h.isQuiz).toList();
+      final testItems = gradableHw.where((h) => h.isTest).toList();
+
+      double calcCategoryAvg(List<HomeworkModel> items, String uid) {
+        double total = 0;
+        int count = 0;
+        for (final hw in items) {
+          final sub = hwToStudentSub[hw.id]?[uid];
+          if (sub != null && sub.status == 'graded' && hw.gradingMode == 'percent') {
+            final pct = hw.maxPoints != null && hw.maxPoints! > 0
+                ? (sub.grade! / hw.maxPoints!) * 100
+                : sub.grade ?? 0;
+            total += pct;
+            count++;
+          } else if (sub != null && (sub.status == 'submitted' || sub.status == 'graded')) {
+            total += 100; // complete = 100%
+            count++;
+          }
+        }
+        return count > 0 ? total / count : 0;
+      }
+
       for (final uid in studentUids) {
-        double totalPct = 0;
-        int countGraded = 0;
         int countSubmitted = 0;
+        int countGraded = 0;
         final hwGrades = <String, dynamic>{};
         for (final hw in allHw) {
+          if (hw.isContent) continue; // skip content items
           final sub = hwToStudentSub[hw.id]?[uid];
           if (sub == null) {
             hwGrades[hw.id] = null;
           } else if (sub.status == 'graded' && hw.gradingMode == 'percent') {
-            hwGrades[hw.id] = sub.grade;
+            final grade = sub.grade;
+            hwGrades[hw.id] = grade;
             countGraded++;
-            if (sub.grade != null) {
-              final pct = hw.maxPoints != null && hw.maxPoints! > 0
-                  ? (sub.grade! / hw.maxPoints!) * 100
-                  : sub.grade!;
-              totalPct += pct;
-            }
           } else {
             final done = sub.status == 'submitted' || sub.status == 'graded';
             hwGrades[hw.id] = done ? 'done' : 'pending';
             if (done) countSubmitted++;
           }
         }
-        final completionPct = allHw.isEmpty
+        final completionPct = gradableHw.isEmpty
             ? 0.0
-            : (countSubmitted + countGraded) / allHw.length * 100;
-        final avgGrade = countGraded > 0 ? totalPct / countGraded : null;
+            : (countSubmitted + countGraded) / gradableHw.length * 100;
+
+        // Weighted final grade
+        double? weightedGrade;
+        final hwAvg = hwItems.isEmpty ? null : calcCategoryAvg(hwItems, uid);
+        final quizAvg = quizItems.isEmpty ? null : calcCategoryAvg(quizItems, uid);
+        final testAvg = testItems.isEmpty ? null : calcCategoryAvg(testItems, uid);
+        // Only compute weighted if at least one graded category exists
+        if (hwAvg != null || quizAvg != null || testAvg != null) {
+          double totalWeight = 0;
+          double totalScore = 0;
+          if (hwAvg != null && hwItems.isNotEmpty) {
+            totalWeight += cls.weightHw;
+            totalScore += hwAvg * cls.weightHw;
+          }
+          if (quizAvg != null && quizItems.isNotEmpty) {
+            totalWeight += cls.weightQuiz;
+            totalScore += quizAvg * cls.weightQuiz;
+          }
+          if (testAvg != null && testItems.isNotEmpty) {
+            totalWeight += cls.weightTest;
+            totalScore += testAvg * cls.weightTest;
+          }
+          if (totalWeight > 0) weightedGrade = totalScore / totalWeight;
+        }
 
         rows.add({
           'uid': uid,
           'name': studentNames[uid] ?? uid,
           'hwGrades': hwGrades,
           'completionPct': completionPct,
-          'avgGrade': avgGrade,
+          'avgGrade': weightedGrade,
+          'hwAvg': hwAvg,
+          'quizAvg': quizAvg,
+          'testAvg': testAvg,
         });
       }
 
@@ -286,10 +332,21 @@ class _GradebookScreenState extends State<GradebookScreen> {
                         width: double.infinity,
                         color: AppTheme.navy.withValues(alpha: 0.05),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        child: const Text(
-                            'Tap any assignment column header to view & grade submissions.',
-                            style: TextStyle(fontSize: 11,
-                                color: AppTheme.textSecondary)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                                'Tap any assignment column header to view & grade submissions.',
+                                style: TextStyle(fontSize: 11,
+                                    color: AppTheme.textSecondary)),
+                            const SizedBox(height: 4),
+                            Text(
+                                'Grade weights: HW ${cls.weightHw.round()}% · Quiz ${cls.weightQuiz.round()}% · Test ${cls.weightTest.round()}%',
+                                style: const TextStyle(fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.navy)),
+                          ],
+                        ),
                       ),
                     // Toggle simple view
                     Container(
@@ -354,7 +411,7 @@ class _GradebookScreenState extends State<GradebookScreen> {
             if (!_simpleView)
               const DataColumn(
                   numeric: true,
-                  label: Text('Avg',
+                  label: Text('Weighted\nGrade',
                       style: TextStyle(fontSize: 12,
                           fontWeight: FontWeight.bold, color: AppTheme.navy))),
             ..._allHomework.map((hw) => DataColumn(
@@ -374,23 +431,34 @@ class _GradebookScreenState extends State<GradebookScreen> {
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
                                       color: AppTheme.navy)),
-                              const Text('tap to grade',
-                                  style: TextStyle(
-                                      fontSize: 9,
-                                      color: AppTheme.classesColor)),
+                              Row(children: [
+                                _ItemTypeBadge(hw.itemType),
+                                const SizedBox(width: 4),
+                                const Text('tap',
+                                    style: TextStyle(
+                                        fontSize: 9,
+                                        color: AppTheme.classesColor)),
+                              ]),
                             ],
                           ),
                         ),
                       )
                     : SizedBox(
                         width: 70,
-                        child: Text(hw.title,
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
-                            style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.navy)),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(hw.title,
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.navy)),
+                            _ItemTypeBadge(hw.itemType),
+                          ],
+                        ),
                       ))),
           ],
           rows: _gradebookData.map((row) {
@@ -433,7 +501,41 @@ class _GradebookScreenState extends State<GradebookScreen> {
   }
 }
 
-// ── Submission View Sheet ─────────────────────────────────────────────────────
+// ── Item type badge ───────────────────────────────────────────────────────────
+class _ItemTypeBadge extends StatelessWidget {
+  final String itemType;
+  const _ItemTypeBadge(this.itemType);
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    String label;
+    switch (itemType) {
+      case 'quiz':
+        color = AppTheme.classesColor;
+        label = 'Quiz';
+        break;
+      case 'test':
+        color = AppTheme.mandatoryRed;
+        label = 'Test';
+        break;
+      default:
+        color = AppTheme.assignmentsColor;
+        label = 'HW';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 8, color: color, fontWeight: FontWeight.w700)),
+    );
+  }
+}
+
 /// Mentor/admin view: lists all students' submissions for a given homework,
 /// and allows entering grades inline.
 class _SubmissionViewSheet extends StatefulWidget {

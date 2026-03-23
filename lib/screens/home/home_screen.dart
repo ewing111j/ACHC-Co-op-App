@@ -492,7 +492,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _FeatureItem('Feeds', Icons.dynamic_feed_outlined,
           AppTheme.feedsColor, const FeedsScreen(),
           notifKey: NotificationPrefsService.keyFeedAnnouncements,
-          seenKey: 'feeds'),
+          seenKey: 'feeds',
+          badgeQuery: (db, uid) => db.collection('feedPosts')
+              .where('type', isEqualTo: 'announcement')
+              .orderBy('createdAt', descending: true)
+              .limit(20)),
         _FeatureItem('Training', Icons.school_outlined,
           const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
           seenKey: 'training'),

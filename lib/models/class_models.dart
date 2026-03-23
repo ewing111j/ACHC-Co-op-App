@@ -34,6 +34,10 @@ class ClassModel {
   final double gradeB; // default 85
   final double gradeC; // default 77
   final double gradeD; // default 70
+  // Grade category weights (0-100 each, should sum to 100)
+  final double weightHw;    // default 40
+  final double weightQuiz;  // default 20
+  final double weightTest;  // default 40
   final DateTime? startDate;
   final String schoolYearId; // e.g. "2024-2025"
   final bool isArchived;
@@ -53,6 +57,9 @@ class ClassModel {
     this.gradeB = 85,
     this.gradeC = 77,
     this.gradeD = 70,
+    this.weightHw = 40,
+    this.weightQuiz = 20,
+    this.weightTest = 40,
     this.startDate,
     this.schoolYearId = '',
     this.isArchived = false,
@@ -85,6 +92,9 @@ class ClassModel {
       gradeB: (map['gradeB'] as num?)?.toDouble() ?? 85,
       gradeC: (map['gradeC'] as num?)?.toDouble() ?? 77,
       gradeD: (map['gradeD'] as num?)?.toDouble() ?? 70,
+      weightHw: (map['weightHw'] as num?)?.toDouble() ?? 40,
+      weightQuiz: (map['weightQuiz'] as num?)?.toDouble() ?? 20,
+      weightTest: (map['weightTest'] as num?)?.toDouble() ?? 40,
       startDate: map['startDate'] != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['startDate'] as dynamic).millisecondsSinceEpoch)
@@ -111,6 +121,9 @@ class ClassModel {
         'gradeB': gradeB,
         'gradeC': gradeC,
         'gradeD': gradeD,
+        'weightHw': weightHw,
+        'weightQuiz': weightQuiz,
+        'weightTest': weightTest,
         'startDate': startDate != null ? Timestamp.fromDate(startDate!) : null,
         'schoolYearId': schoolYearId,
         'isArchived': isArchived,
@@ -139,6 +152,9 @@ class ClassModel {
       gradeB: (map['gradeB'] as num?)?.toDouble() ?? 85,
       gradeC: (map['gradeC'] as num?)?.toDouble() ?? 77,
       gradeD: (map['gradeD'] as num?)?.toDouble() ?? 70,
+      weightHw: (map['weightHw'] as num?)?.toDouble() ?? 40,
+      weightQuiz: (map['weightQuiz'] as num?)?.toDouble() ?? 20,
+      weightTest: (map['weightTest'] as num?)?.toDouble() ?? 40,
       startDate: map['startDate'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['startDate'] as int)
           : null,
@@ -235,6 +251,8 @@ class ClassWeekModel {
 
 // ─── HomeworkModel ───────────────────────────────────────────────────────────
 // A single homework/assignment item within a class week
+// Item types: 'hw' | 'quiz' | 'test' | 'content'
+// content items are display-only (not graded); hw/quiz/test are graded.
 class HomeworkModel {
   final String id;
   final String classId;
@@ -250,6 +268,19 @@ class HomeworkModel {
   int get order => sortOrder; // alias used by UI
   final bool isHidden;
   final DateTime createdAt;
+  /// 'hw' | 'quiz' | 'test' | 'content'
+  final String itemType;
+  /// For content items: optional URL to embed/link
+  final String? contentUrl;
+  /// For content items: optional video embed URL
+  final String? videoUrl;
+  /// File IDs linked to this homework item
+  final List<String> linkedFileIds;
+
+  bool get isContent => itemType == 'content';
+  bool get isQuiz => itemType == 'quiz';
+  bool get isTest => itemType == 'test';
+  bool get isHw => itemType == 'hw' || itemType.isEmpty;
 
   const HomeworkModel({
     required this.id,
@@ -264,6 +295,10 @@ class HomeworkModel {
     this.sortOrder = 0,
     this.isHidden = false,
     required this.createdAt,
+    this.itemType = 'hw',
+    this.contentUrl,
+    this.videoUrl,
+    this.linkedFileIds = const [],
   });
 
   // 4-arg factory so gradebook_screen can pass classId + weekId overrides
@@ -288,6 +323,10 @@ class HomeworkModel {
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['createdAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
+      itemType: map['itemType'] as String? ?? 'hw',
+      contentUrl: map['contentUrl'] as String?,
+      videoUrl: map['videoUrl'] as String?,
+      linkedFileIds: List<String>.from(map['linkedFileIds'] as List? ?? []),
     );
   }
 
@@ -302,6 +341,10 @@ class HomeworkModel {
         'maxPoints': maxPoints,
         'sortOrder': sortOrder,
         'isHidden': isHidden,
+        'itemType': itemType,
+        if (contentUrl != null) 'contentUrl': contentUrl,
+        if (videoUrl != null) 'videoUrl': videoUrl,
+        'linkedFileIds': linkedFileIds,
       };
 }
 
@@ -415,6 +458,12 @@ class ClassFileModel {
   final String uploaderUid;
   final String uploaderName;
   final DateTime uploadedAt;
+  /// Optional description shown on class page when showOnPage is true
+  final String description;
+  /// Whether to show this file as a card on the class page
+  final bool showOnPage;
+  /// Section label for grouping files (e.g. 'Textbooks', 'Week Resources')
+  final String section;
 
   const ClassFileModel({
     required this.id,
@@ -427,6 +476,9 @@ class ClassFileModel {
     required this.uploaderUid,
     required this.uploaderName,
     required this.uploadedAt,
+    this.description = '',
+    this.showOnPage = false,
+    this.section = '',
   });
 
   factory ClassFileModel.fromMap(Map<String, dynamic> map, String id) {
@@ -444,6 +496,9 @@ class ClassFileModel {
           ? DateTime.fromMillisecondsSinceEpoch(
               (map['uploadedAt'] as dynamic).millisecondsSinceEpoch)
           : DateTime.now(),
+      description: map['description'] as String? ?? '',
+      showOnPage: map['showOnPage'] as bool? ?? false,
+      section: map['section'] as String? ?? '',
     );
   }
 
@@ -457,6 +512,9 @@ class ClassFileModel {
         'uploaderUid': uploaderUid,
         'uploaderName': uploaderName,
         'uploadedAt': Timestamp.fromDate(uploadedAt),
+        'description': description,
+        'showOnPage': showOnPage,
+        'section': section,
       };
 }
 

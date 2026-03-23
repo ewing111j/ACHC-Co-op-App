@@ -50,8 +50,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
   @override
   void initState() {
     super.initState();
-    // Tab 0 = Weekly (default), Tab 1 = Overview
-    _tabController = TabController(length: 2, vsync: this);
+    // Tab 0 = Weekly, Tab 1 = Monthly, Tab 2 = Overview
+    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 
@@ -247,8 +247,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     final viewUid =
         user.isStudent ? user.uid : (_selectedKidUid ?? user.uid);
 
-    // All roles get both Weekly and Overview tabs
-    const tabCount = 2;
+    // All roles get Weekly, Monthly, and Overview tabs
+    const tabCount = 3;
     if (_tabController.length != tabCount) {
       _tabController.dispose();
       _tabController = TabController(length: tabCount, vsync: this);
@@ -288,6 +288,9 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
                 icon: Icon(Icons.calendar_view_week_outlined, size: 18),
                 text: 'Weekly'),
             Tab(
+                icon: Icon(Icons.calendar_view_month_outlined, size: 18),
+                text: 'Monthly'),
+            Tab(
                 icon: Icon(Icons.list_alt_outlined, size: 18),
                 text: 'Overview'),
           ],
@@ -324,6 +327,12 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
                     kidNames: kidNames,
                     moodleConfigured: _moodleService.isConfigured,
                     onMoodleSetup: _showMoodleSetup,
+                  ),
+                  _MonthlyTab(
+                    assignments: all,
+                    user: user,
+                    db: _db,
+                    kidNames: kidNames,
                   ),
                   _OverviewTab(
                     assignments: all,
@@ -503,6 +512,330 @@ class _WeeklyTabState extends State<_WeeklyTab> {
     final end = start.add(const Duration(days: 6));
     final fmt = DateFormat('MMM d');
     return '${fmt.format(start)} – ${fmt.format(end)}, ${start.year}';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MONTHLY TAB — 4-column grid: prev week | curr week | next week | week after
+// Navigation arrows shift the view by one week at a time
+// ─────────────────────────────────────────────────────────────────────────────
+class _MonthlyTab extends StatefulWidget {
+  final List<AssignmentModel> assignments;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Map<String, String> kidNames;
+
+  const _MonthlyTab({
+    required this.assignments,
+    required this.user,
+    required this.db,
+    required this.kidNames,
+  });
+
+  @override
+  State<_MonthlyTab> createState() => _MonthlyTabState();
+}
+
+class _MonthlyTabState extends State<_MonthlyTab> {
+  // offset=0 means current week is the 2nd column (index 1)
+  int _weekOffset = 0; // 0 = showing -1, 0, +1, +2
+
+  DateTime _weekStart(int relativeOffset) {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    return monday.add(Duration(days: (_weekOffset + relativeOffset) * 7));
+  }
+
+  List<AssignmentModel> _assignmentsForWeek(DateTime start) {
+    final end = start.add(const Duration(days: 7));
+    return widget.assignments
+        .where((a) => !a.dueDate.isBefore(start) && a.dueDate.isBefore(end))
+        .toList()
+      ..sort((a, b) => a.dueDate.compareTo(b.dueDate));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 4 columns: offsets -1, 0, +1, +2 relative to _weekOffset
+    final cols = [-1, 0, 1, 2];
+    final isCurrentWeekVisible = _weekOffset == 0;
+
+    return Column(
+      children: [
+        // Navigation bar
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                tooltip: 'Previous week',
+                onPressed: () => setState(() => _weekOffset--),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: isCurrentWeekVisible
+                      ? null
+                      : () => setState(() => _weekOffset = 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Monthly View',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                                color: AppTheme.textPrimary),
+                          ),
+                          if (!isCurrentWeekVisible) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.navy.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text('Today',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: AppTheme.navy,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${DateFormat('MMM d').format(_weekStart(-1))} – ${DateFormat('MMM d').format(_weekStart(2).add(const Duration(days: 6)))}',
+                        style: const TextStyle(
+                            fontSize: 11, color: AppTheme.textHint),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                tooltip: 'Next week',
+                onPressed: () => setState(() => _weekOffset++),
+              ),
+            ],
+          ),
+        ),
+        AppTheme.goldDivider(),
+        // Column headers
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Row(
+            children: cols.map((offset) {
+              final start = _weekStart(offset);
+              final isCurrentWeek = offset == 0 && _weekOffset == 0
+                  || (_weekOffset + offset == 0);
+              // Actually check if this column represents the current calendar week
+              final now = DateTime.now();
+              final thisMonday = DateTime(now.year, now.month, now.day)
+                  .subtract(Duration(days: now.weekday - 1));
+              final colIsThisWeek = start.isAtSameMomentAs(thisMonday) ||
+                  (start.isBefore(now) &&
+                      start.add(const Duration(days: 7)).isAfter(now));
+              return Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: colIsThisWeek
+                        ? AppTheme.navy.withValues(alpha: 0.1)
+                        : AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: colIsThisWeek
+                          ? AppTheme.navy.withValues(alpha: 0.3)
+                          : AppTheme.cardBorder,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        colIsThisWeek ? 'This Week' : DateFormat('MMM d').format(start),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: colIsThisWeek ? AppTheme.navy : AppTheme.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (!colIsThisWeek)
+                        Text(
+                          DateFormat('MMM d').format(start.add(const Duration(days: 6))),
+                          style: const TextStyle(
+                              fontSize: 9, color: AppTheme.textHint),
+                          textAlign: TextAlign.center,
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        // Content grid
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: cols.map((offset) {
+                final start = _weekStart(offset);
+                final items = _assignmentsForWeek(start);
+                final now = DateTime.now();
+                final colIsThisWeek = start.isBefore(now) &&
+                    start.add(const Duration(days: 7)).isAfter(now);
+                return Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: BoxDecoration(
+                      color: colIsThisWeek
+                          ? AppTheme.navy.withValues(alpha: 0.03)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: items.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Text('—',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textHint)),
+                          )
+                        : Column(
+                            children: items
+                                .map((a) => _MonthlyAssignmentChip(
+                                      assignment: a,
+                                      user: widget.user,
+                                      db: widget.db,
+                                      kidNames: widget.kidNames,
+                                    ))
+                                .toList(),
+                          ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MonthlyAssignmentChip extends StatelessWidget {
+  final AssignmentModel assignment;
+  final UserModel user;
+  final FirebaseFirestore db;
+  final Map<String, String> kidNames;
+  const _MonthlyAssignmentChip({
+    required this.assignment,
+    required this.user,
+    required this.db,
+    required this.kidNames,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final a = assignment;
+    final isDone = a.isDone;
+    final isOverdue = a.isOverdue;
+    final color = isOverdue
+        ? AppTheme.error
+        : a.isOptional
+            ? AppTheme.optionalGreen
+            : AppTheme.mandatoryRed;
+
+    return GestureDetector(
+      onTap: () {
+        if (a.fromClass) {
+          _openClassHomework(context, a);
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4, left: 2, right: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          color: isDone
+              ? AppTheme.optionalGreen.withValues(alpha: 0.08)
+              : color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border(left: BorderSide(color: color, width: 3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              if (isDone)
+                const Icon(Icons.check_circle, size: 10, color: AppTheme.optionalGreen),
+              if (!isDone && isOverdue)
+                const Icon(Icons.warning_amber, size: 10, color: AppTheme.error),
+              if (!isDone && !isOverdue)
+                Icon(Icons.circle_outlined, size: 10, color: color),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  a.title,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: isDone ? AppTheme.textHint : AppTheme.textPrimary,
+                    decoration: isDone ? TextDecoration.lineThrough : null,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ]),
+            if (a.courseName.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                a.courseName,
+                style: const TextStyle(
+                    fontSize: 9, color: AppTheme.textHint),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openClassHomework(BuildContext context, AssignmentModel a) async {
+    if (a.classId == null) return;
+    try {
+      final doc = await db.collection('classes').doc(a.classId).get();
+      if (!doc.exists || !context.mounted) return;
+      final classModel = ClassModel.fromMap(doc.data()!, doc.id);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClassDashboardScreen(classModel: classModel, user: user),
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open class: $e'),
+            backgroundColor: AppTheme.error,
+            behavior: SnackBarBehavior.floating));
+      }
+    }
   }
 }
 

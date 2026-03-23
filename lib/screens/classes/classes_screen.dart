@@ -245,13 +245,19 @@ class _ClassCard extends StatelessWidget {
                   _MentorNames(mentorUids: cls.mentorUids, db: db),
                   const SizedBox(height: 10),
                   // Progress bar (student/parent view)
-                  if (user.isStudent)
+                  if (user.isStudent) ...[
                     _ProgressBar(
                         classId: cls.id,
                         studentUid: user.uid,
                         db: db,
-                        color: color)
-                  else if (user.canMentor || user.isAdmin)
+                        color: color),
+                    const SizedBox(height: 8),
+                    _GradeIndicator(
+                        classId: cls.id,
+                        studentUid: user.uid,
+                        classModel: cls,
+                        db: db),
+                  ] else if (user.canMentor || user.isAdmin)
                     Row(
                       children: [
                         const Icon(Icons.people_outline,
@@ -383,6 +389,142 @@ class _ProgressBar extends StatelessWidget {
       return doneHw / totalHw;
     } catch (_) {
       return 0.0;
+    }
+  }
+}
+
+// ── Grade Indicator (student view – shows weighted grade) ────────────────────
+class _GradeIndicator extends StatelessWidget {
+  final String classId;
+  final String studentUid;
+  final ClassModel classModel;
+  final FirebaseFirestore db;
+  const _GradeIndicator({
+    required this.classId,
+    required this.studentUid,
+    required this.classModel,
+    required this.db,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<double?>(
+      future: _calcGrade(),
+      builder: (ctx, snap) {
+        if (!snap.hasData || snap.data == null) return const SizedBox.shrink();
+        final grade = snap.data!;
+        final cls = classModel;
+        final letter = cls.gradebookSimple ? null : cls.letterGrade(grade);
+        final color = grade >= 90
+            ? AppTheme.optionalGreen
+            : grade >= 70
+                ? AppTheme.warning
+                : AppTheme.error;
+        return Row(children: [
+          Icon(Icons.star_rounded, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            letter != null
+                ? '$letter · ${grade.toStringAsFixed(0)}%'
+                : '${grade.toStringAsFixed(0)}%',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color),
+          ),
+          const SizedBox(width: 4),
+          Text('current grade',
+              style: const TextStyle(fontSize: 10, color: AppTheme.textHint)),
+        ]);
+      },
+    );
+  }
+
+  Future<double?> _calcGrade() async {
+    try {
+      final weeksSnap = await db
+          .collection('classes')
+          .doc(classId)
+          .collection('weeks')
+          .where('isBreak', isEqualTo: false)
+          .get();
+
+      double hwTotal = 0; int hwCount = 0;
+      double quizTotal = 0; int quizCount = 0;
+      double testTotal = 0; int testCount = 0;
+
+      for (final weekDoc in weeksSnap.docs) {
+        final hwSnap = await db
+            .collection('classes')
+            .doc(classId)
+            .collection('weeks')
+            .doc(weekDoc.id)
+            .collection('homework')
+            .where('isHidden', isEqualTo: false)
+            .get();
+        for (final hwDoc in hwSnap.docs) {
+          final data = hwDoc.data();
+          final itemType = data['itemType'] as String? ?? 'hw';
+          if (itemType == 'content') continue;
+          final gradingMode = data['gradingMode'] as String? ?? 'complete';
+          final maxPoints = (data['maxPoints'] as num?)?.toDouble();
+
+          final subSnap = await db
+              .collection('classes')
+              .doc(classId)
+              .collection('weeks')
+              .doc(weekDoc.id)
+              .collection('homework')
+              .doc(hwDoc.id)
+              .collection('submissions')
+              .where('studentUid', isEqualTo: studentUid)
+              .limit(1)
+              .get();
+          if (subSnap.docs.isEmpty) continue;
+          final sub = subSnap.docs.first.data();
+          final status = sub['status'] as String? ?? 'incomplete';
+          final grade = (sub['grade'] as num?)?.toDouble();
+
+          double pct;
+          if (status == 'graded' && gradingMode == 'percent' && grade != null) {
+            pct = maxPoints != null && maxPoints > 0
+                ? (grade / maxPoints) * 100
+                : grade;
+          } else if (status == 'submitted' || status == 'graded' || status == 'complete') {
+            pct = 100;
+          } else {
+            continue;
+          }
+
+          if (itemType == 'quiz') {
+            quizTotal += pct; quizCount++;
+          } else if (itemType == 'test') {
+            testTotal += pct; testCount++;
+          } else {
+            hwTotal += pct; hwCount++;
+          }
+        }
+      }
+
+      if (hwCount == 0 && quizCount == 0 && testCount == 0) return null;
+
+      final cls = classModel;
+      double totalWeight = 0, totalScore = 0;
+      if (hwCount > 0) {
+        totalWeight += cls.weightHw;
+        totalScore += (hwTotal / hwCount) * cls.weightHw;
+      }
+      if (quizCount > 0) {
+        totalWeight += cls.weightQuiz;
+        totalScore += (quizTotal / quizCount) * cls.weightQuiz;
+      }
+      if (testCount > 0) {
+        totalWeight += cls.weightTest;
+        totalScore += (testTotal / testCount) * cls.weightTest;
+      }
+      return totalWeight > 0 ? totalScore / totalWeight : null;
+    } catch (_) {
+      return null;
     }
   }
 }
