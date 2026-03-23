@@ -117,6 +117,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           fontWeight: FontWeight.w600),
                     ),
                   ),
+                  // Debug: show isMentor flag if set
+                  if (user.isMentor)
+                    Container(
+                      margin: const EdgeInsets.only(left: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gold.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'MENTOR',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
                 ],
               ),
             ),

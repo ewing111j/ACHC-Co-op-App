@@ -803,7 +803,8 @@ class _HomeworkCardState extends State<_HomeworkCard> {
   }
 
   Future<void> _loadSubmission() async {
-    if (!widget.user.isStudent) {
+    // Only load submission for non-editors (students / parents in a class)
+    if (widget.user.canEditClasses) {
       if (mounted) setState(() => _loading = false);
       return;
     }
@@ -843,8 +844,9 @@ class _HomeworkCardState extends State<_HomeworkCard> {
 
     return GestureDetector(
       onTap: () async {
-        // Students see the submission/detail view; mentors/admins see the edit view
-        if (widget.user.isStudent) {
+        // Non-editors (students / enrolled parents) see submission view;
+        // mentors/admins see the edit form
+        if (!widget.user.canEditClasses) {
           await showModalBottomSheet(
             context: context,
             isScrollControlled: true,
@@ -899,7 +901,7 @@ class _HomeworkCardState extends State<_HomeworkCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Toggle circle
-              if (widget.user.isStudent)
+              if (!widget.user.canEditClasses)
                 GestureDetector(
                   onTap: _loading ? null : _toggleComplete,
                   child: Container(

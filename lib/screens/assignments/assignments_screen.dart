@@ -67,7 +67,9 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     final assignmentsProvider = context.read<AssignmentsProvider>();
     await assignmentsProvider.initHive();
     final familyId = user.familyId ?? '';
-    final viewUid = user.isStudent ? user.uid : null;
+    // Always pass uid so class homework loads for any enrolled user,
+    // regardless of role (handles role-mismatch cases too)
+    final viewUid = user.uid;
     await assignmentsProvider.load(familyId, viewUid);
   }
 

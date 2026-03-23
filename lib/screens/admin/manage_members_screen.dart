@@ -367,8 +367,57 @@ class _UserList extends StatelessWidget {
                               fontWeight: FontWeight.w700)),
                     ),
                     const SizedBox(width: 4),
-                    const Icon(Icons.chevron_right,
-                        size: 18, color: AppTheme.textHint),
+                    // Role change popup
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert,
+                          size: 18, color: AppTheme.textHint),
+                      tooltip: 'Change role',
+                      onSelected: (newRole) async {
+                        await db
+                            .collection('users')
+                            .doc(uid)
+                            .update({'role': newRole});
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(
+                                '$name role → ${newRole.toUpperCase()}'),
+                            backgroundColor: AppTheme.success,
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                            value: 'student',
+                            child: Row(children: [
+                              Icon(Icons.school_outlined, size: 16),
+                              SizedBox(width: 8),
+                              Text('Set as Student'),
+                            ])),
+                        const PopupMenuItem(
+                            value: 'parent',
+                            child: Row(children: [
+                              Icon(Icons.family_restroom, size: 16),
+                              SizedBox(width: 8),
+                              Text('Set as Parent'),
+                            ])),
+                        const PopupMenuItem(
+                            value: 'mentor',
+                            child: Row(children: [
+                              Icon(Icons.workspace_premium_outlined, size: 16),
+                              SizedBox(width: 8),
+                              Text('Set as Mentor'),
+                            ])),
+                        const PopupMenuItem(
+                            value: 'admin',
+                            child: Row(children: [
+                              Icon(Icons.admin_panel_settings_outlined,
+                                  size: 16),
+                              SizedBox(width: 8),
+                              Text('Set as Admin'),
+                            ])),
+                      ],
+                    ),
                   ],
                 ),
                 onTap: () => onTap(uid, name),
