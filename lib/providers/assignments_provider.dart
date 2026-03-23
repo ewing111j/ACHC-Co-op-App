@@ -51,9 +51,22 @@ class AssignmentsProvider extends ChangeNotifier {
     }
   }
 
+  // ── Refresh class homework on demand (call when returning to screen) ─────
+  Future<void> refreshClassHomework() async {
+    if (_viewUid != null) {
+      await _loadClassHomeworkForStudent(_viewUid!);
+    }
+  }
+
   // ── Load (subscribe to Firestore + hydrate from cache on first frame) ────
   Future<void> load(String familyId, String? viewUid) async {
-    if (_familyId == familyId && _viewUid == viewUid) return; // no change
+    if (_familyId == familyId && _viewUid == viewUid) {
+      // Same params: still refresh class homework in case new HW was added
+      if (viewUid != null) {
+        _loadClassHomeworkForStudent(viewUid); // fire-and-forget
+      }
+      return;
+    }
     _familyId = familyId;
     _viewUid = viewUid;
 
@@ -151,10 +164,35 @@ class AssignmentsProvider extends ChangeNotifier {
               }
             } catch (_) {}
 
-            final dueDate = data['dueDate'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(
-                    (data['dueDate'] as dynamic).millisecondsSinceEpoch)
-                : DateTime.now().add(const Duration(days: 7));
+            DateTime dueDate;
+            try {
+              final raw = data['dueDate'];
+              if (raw == null) {
+                dueDate = DateTime.now().add(const Duration(days: 7));
+              } else if (raw is DateTime) {
+                dueDate = raw;
+              } else {
+                dueDate = DateTime.fromMillisecondsSinceEpoch(
+                    (raw as dynamic).millisecondsSinceEpoch as int);
+              }
+            } catch (_) {
+              dueDate = DateTime.now().add(const Duration(days: 7));
+            }
+
+            DateTime createdAt;
+            try {
+              final raw = data['createdAt'];
+              if (raw == null) {
+                createdAt = DateTime.now();
+              } else if (raw is DateTime) {
+                createdAt = raw;
+              } else {
+                createdAt = DateTime.fromMillisecondsSinceEpoch(
+                    (raw as dynamic).millisecondsSinceEpoch as int);
+              }
+            } catch (_) {
+              createdAt = DateTime.now();
+            }
 
             hwList.add(AssignmentModel(
               id: 'class_${classId}_${hwDoc.id}',
@@ -168,10 +206,7 @@ class AssignmentsProvider extends ChangeNotifier {
               fromMoodle: false,
               isOptional: false,
               familyId: '',
-              createdAt: data['createdAt'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch(
-                      (data['createdAt'] as dynamic).millisecondsSinceEpoch)
-                  : DateTime.now(),
+              createdAt: createdAt,
               fromClass: true,
               classId: classId,
               weekId: weekId,
