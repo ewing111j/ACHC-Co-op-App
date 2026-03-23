@@ -18,6 +18,7 @@ class UserModel {
   final DateTime createdAt;
   final bool isActive;
   final String? fcmToken;
+  final bool isYoungLearner; // per-student flag for simplified UI mode
 
   const UserModel({
     required this.uid,
@@ -35,6 +36,7 @@ class UserModel {
     required this.createdAt,
     this.isActive = true,
     this.fcmToken,
+    this.isYoungLearner = false,
   });
 
   bool get isParent => role == UserRole.parent;
@@ -66,6 +68,7 @@ class UserModel {
           : DateTime.now(),
       isActive: map['isActive'] as bool? ?? true,
       fcmToken: map['fcmToken'] as String?,
+      isYoungLearner: map['is_young_learner'] as bool? ?? false,
     );
   }
 
@@ -84,6 +87,7 @@ class UserModel {
       'moodleUrl': moodleUrl,
       'isActive': isActive,
       'fcmToken': fcmToken,
+      'is_young_learner': isYoungLearner,
     };
   }
 
@@ -97,6 +101,7 @@ class UserModel {
     bool? isMentor,
     String? fcmToken,
     bool? isActive,
+    bool? isYoungLearner,
   }) {
     return UserModel(
       uid: uid,
@@ -114,6 +119,7 @@ class UserModel {
       createdAt: createdAt,
       isActive: isActive ?? this.isActive,
       fcmToken: fcmToken ?? this.fcmToken,
+      isYoungLearner: isYoungLearner ?? this.isYoungLearner,
     );
   }
 

@@ -183,7 +183,8 @@ class StudentProgressModel {
   final String cycleId;
   final int masteryLevel; // 0=unrated, 1=just heard, 2=getting there, 3=got it
   final DateTime? lastPracticed;
-  final int practiceCount;
+  final int sungPlayCount;   // replaces practiceCount — sung audio plays
+  final int spokenPlayCount; // spoken audio plays
   final int wpEarnedTotal;
   final bool isActiveCycle;
   final bool sungPlayedFirst;
@@ -195,11 +196,15 @@ class StudentProgressModel {
     required this.cycleId,
     required this.masteryLevel,
     this.lastPracticed,
-    required this.practiceCount,
+    this.sungPlayCount = 0,
+    this.spokenPlayCount = 0,
     required this.wpEarnedTotal,
     required this.isActiveCycle,
     required this.sungPlayedFirst,
   });
+
+  /// Backwards-compat total for display (sung + spoken)
+  int get practiceCount => sungPlayCount + spokenPlayCount;
 
   String get masteryLabel {
     switch (masteryLevel) {
@@ -227,7 +232,9 @@ class StudentProgressModel {
       cycleId: m['cycle_id'] as String? ?? '',
       masteryLevel: m['mastery_level'] as int? ?? 0,
       lastPracticed: parseTs(m['last_practiced']),
-      practiceCount: m['practice_count'] as int? ?? 0,
+      sungPlayCount: (m['sung_play_count'] as int?) ??
+          (m['practice_count'] as int? ?? 0), // migrate old field
+      spokenPlayCount: m['spoken_play_count'] as int? ?? 0,
       wpEarnedTotal: m['wp_earned_total'] as int? ?? 0,
       isActiveCycle: m['is_active_cycle'] as bool? ?? true,
       sungPlayedFirst: m['sung_played_first'] as bool? ?? false,
@@ -240,7 +247,8 @@ class StudentProgressModel {
         'cycle_id': cycleId,
         'mastery_level': masteryLevel,
         'last_practiced': lastPracticed != null ? Timestamp.fromDate(lastPracticed!) : null,
-        'practice_count': practiceCount,
+        'sung_play_count': sungPlayCount,
+        'spoken_play_count': spokenPlayCount,
         'wp_earned_total': wpEarnedTotal,
         'is_active_cycle': isActiveCycle,
         'sung_played_first': sungPlayedFirst,

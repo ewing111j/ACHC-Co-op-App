@@ -10,6 +10,9 @@ class MemoryProvider extends ChangeNotifier {
 
   MemoryProvider(this._db);
 
+  /// Expose Firestore instance for screens that need direct reads (e.g. parent dashboard)
+  FirebaseFirestore get db => _db;
+
   // ── State ────────────────────────────────────────────────────────────────
   bool _loading = false;
   String? _error;
@@ -215,7 +218,8 @@ class MemoryProvider extends ChangeNotifier {
         cycleId: activeCycleId,
         masteryLevel: masteryLevel,
         lastPracticed: now,
-        practiceCount: existing.practiceCount + 1,
+        sungPlayCount: existing.sungPlayCount + (sungPlayedFirst ? 1 : 0),
+        spokenPlayCount: existing.spokenPlayCount + (sungPlayedFirst ? 0 : 1),
         wpEarnedTotal: existing.wpEarnedTotal + wpEarned,
         isActiveCycle: true,
         sungPlayedFirst: existing.sungPlayedFirst || sungPlayedFirst,
@@ -231,7 +235,8 @@ class MemoryProvider extends ChangeNotifier {
         cycleId: activeCycleId,
         masteryLevel: masteryLevel,
         lastPracticed: now,
-        practiceCount: 1,
+        sungPlayCount: sungPlayedFirst ? 1 : 0,
+        spokenPlayCount: sungPlayedFirst ? 0 : 1,
         wpEarnedTotal: wpEarned,
         isActiveCycle: true,
         sungPlayedFirst: sungPlayedFirst,
@@ -288,6 +293,7 @@ class MemoryProvider extends ChangeNotifier {
     if (_studentId != null && existing != null) {
       await _db.collection('student_progress').doc(existing.id).update({
         'sung_played_first': true,
+        'sung_play_count': existing.sungPlayCount + 1,
       });
       _progressMap[memoryItemId] = StudentProgressModel(
         id: existing.id,
@@ -296,13 +302,117 @@ class MemoryProvider extends ChangeNotifier {
         cycleId: existing.cycleId,
         masteryLevel: existing.masteryLevel,
         lastPracticed: existing.lastPracticed,
-        practiceCount: existing.practiceCount,
+        sungPlayCount: existing.sungPlayCount + 1,
+        spokenPlayCount: existing.spokenPlayCount,
         wpEarnedTotal: existing.wpEarnedTotal,
         isActiveCycle: existing.isActiveCycle,
         sungPlayedFirst: true,
       );
     }
     return 2;
+  }
+
+  /// Record a spoken play (no WP — spoken is informational only)
+  Future<void> recordSpokenPlayed(String memoryItemId) async {
+    final existing = _progressMap[memoryItemId];
+    if (_studentId == null || existing == null) return;
+    await _db.collection('student_progress').doc(existing.id).update({
+      'spoken_play_count': existing.spokenPlayCount + 1,
+    });
+    _progressMap[memoryItemId] = StudentProgressModel(
+      id: existing.id,
+      studentId: existing.studentId,
+      memoryItemId: memoryItemId,
+      cycleId: existing.cycleId,
+      masteryLevel: existing.masteryLevel,
+      lastPracticed: existing.lastPracticed,
+      sungPlayCount: existing.sungPlayCount,
+      spokenPlayCount: existing.spokenPlayCount + 1,
+      wpEarnedTotal: existing.wpEarnedTotal,
+      isActiveCycle: existing.isActiveCycle,
+      sungPlayedFirst: existing.sungPlayedFirst,
+    );
+    notifyListeners();
+  }
+
+  /// Log parent audio play (no student_progress write, no WP)
+  Future<void> recordParentPlay(String parentUid, String memoryItemId,
+      {required bool isSung}) async {
+    await _db
+        .collection('parent_audio_log')
+        .doc('${parentUid}_$memoryItemId')
+        .set({
+      'parent_uid': parentUid,
+      'memory_item_id': memoryItemId,
+      'is_sung': isSung,
+      'last_played': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ── Parent dashboard helpers ──────────────────────────────────────────────
+
+  /// Load lumen + achievements + recent progress for a list of student IDs.
+  /// Returns a map keyed by studentId.
+  Future<Map<String, ChildProgressSnapshot>> loadChildSnapshots(
+      List<String> childIds) async {
+    final result = <String, ChildProgressSnapshot>{};
+    for (final childId in childIds) {
+      try {
+        // Lumen
+        final lumenSnap = await _db
+            .collection('lumen_state')
+            .where('student_id', isEqualTo: childId)
+            .where('cycle_id', isEqualTo: activeCycleId)
+            .where('is_active', isEqualTo: true)
+            .limit(1)
+            .get();
+        final lumen = lumenSnap.docs.isNotEmpty
+            ? LumenStateModel.fromMap(
+                lumenSnap.docs.first.id, lumenSnap.docs.first.data())
+            : null;
+
+        // Achievements
+        final achSnap = await _db
+            .collection('achievements')
+            .where('student_id', isEqualTo: childId)
+            .where('cycle_id', isEqualTo: activeCycleId)
+            .where('is_active_cycle', isEqualTo: true)
+            .get();
+        final achievements = achSnap.docs
+            .map((d) => AchievementModel.fromMap(d.id, d.data()))
+            .toList();
+
+        // Recent progress (last 7 days — simple query, sort in memory)
+        final since = Timestamp.fromDate(
+            DateTime.now().subtract(const Duration(days: 7)));
+        final progSnap = await _db
+            .collection('student_progress')
+            .where('student_id', isEqualTo: childId)
+            .where('cycle_id', isEqualTo: activeCycleId)
+            .get();
+
+        final recentProgress = progSnap.docs
+            .map((d) => StudentProgressModel.fromMap(d.id, d.data()))
+            .where((p) =>
+                p.lastPracticed != null &&
+                p.lastPracticed!
+                    .isAfter(since.toDate()))
+            .toList();
+
+        result[childId] = ChildProgressSnapshot(
+          lumen: lumen,
+          achievements: achievements,
+          recentProgress: recentProgress,
+        );
+      } catch (_) {
+        result[childId] = const ChildProgressSnapshot(
+          lumen: null,
+          achievements: [],
+          recentProgress: [],
+        );
+      }
+    }
+    return result;
   }
 
   // ── Admin settings ────────────────────────────────────────────────────────
@@ -312,9 +422,29 @@ class MemoryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Toggle Young Learner mode for a student (parent/admin only)
+  Future<void> setYoungLearnerMode(String studentUid, {required bool enabled}) async {
+    await _db.collection('users').doc(studentUid).update({
+      'is_young_learner': enabled,
+    });
+  }
+
   void refreshStudentData() {
     if (_studentId != null) {
       _loadStudentData(_studentId!).then((_) => notifyListeners());
     }
   }
+}
+
+// ─── Public snapshot for parent dashboard ───────────────────────────────────
+class ChildProgressSnapshot {
+  final LumenStateModel? lumen;
+  final List<AchievementModel> achievements;
+  final List<StudentProgressModel> recentProgress;
+
+  const ChildProgressSnapshot({
+    required this.lumen,
+    required this.achievements,
+    required this.recentProgress,
+  });
 }

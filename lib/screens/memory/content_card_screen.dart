@@ -19,12 +19,14 @@ class ContentCardScreen extends StatefulWidget {
   final int unitNumber;
   final UserModel user;
   final List<MemoryItemModel>? preloadedItems; // optional for drill/battle
+  final String? viewingChildId; // parent viewing a specific child's content
 
   const ContentCardScreen({
     super.key,
     required this.subjectId,
     required this.unitNumber,
     required this.user,
+    this.viewingChildId,
   }) : preloadedItems = null;
 
   const ContentCardScreen.withItems({
@@ -33,6 +35,7 @@ class ContentCardScreen extends StatefulWidget {
     required this.unitNumber,
     required this.user,
     required List<MemoryItemModel> items,
+    this.viewingChildId,
   }) : preloadedItems = items;
 
   @override

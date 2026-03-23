@@ -15,6 +15,9 @@ import 'battle_entry_screen.dart';
 import 'achievements_screen.dart';
 import 'memory_settings_screen.dart';
 import 'content_manager_screen.dart';
+import 'young_learner_screens.dart';
+import 'class_battle_screen.dart';
+import '../../providers/class_mode_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MemoryWorkHomeScreen
@@ -43,6 +46,22 @@ class _MemoryWorkHomeScreenState extends State<MemoryWorkHomeScreen> {
               ? widget.user.kidUids.first
               : null);
       _provider.load(studentId: studentId);
+
+      // If this student has Young Learner mode on, redirect immediately
+      // after the frame so the provider has time to initialize.
+      if (widget.user.isYoungLearner) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    YoungLearnerHomeScreen(user: widget.user),
+              ),
+            );
+          }
+        });
+      }
     });
   }
 
@@ -50,58 +69,98 @@ class _MemoryWorkHomeScreenState extends State<MemoryWorkHomeScreen> {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider.value(
       value: context.read<MemoryProvider>(),
-      child: Scaffold(
-        backgroundColor: AppTheme.background,
-        appBar: AppBar(
-          backgroundColor: AppTheme.navy,
-          foregroundColor: Colors.white,
-          title: const Text('Memory Work',
-              style: TextStyle(fontWeight: FontWeight.w700)),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, size: 18),
-            onPressed: () => Navigator.pop(context),
-          ),
-          actions: [
-            if (widget.user.isAdmin)
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MemoryWorkSettingsScreen(user: widget.user),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        body: Consumer<MemoryProvider>(
-          builder: (context, provider, _) {
-            if (provider.loading) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (provider.error != null) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                    const SizedBox(height: 12),
-                    Text(provider.error!, textAlign: TextAlign.center),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => provider.load(
-                        studentId: widget.user.isStudent ? widget.user.uid : null,
+      child: Consumer<ClassModeProvider>(
+        builder: (context, classModeProvider, _) {
+          return Stack(
+            children: [
+              Scaffold(
+                backgroundColor: AppTheme.background,
+                appBar: AppBar(
+                  backgroundColor: AppTheme.navy,
+                  foregroundColor: Colors.white,
+                  title: Text(
+                    classModeProvider.isActive
+                        ? 'Memory Work — Class Mode'
+                        : 'Memory Work',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                  leading: classModeProvider.isActive
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                  actions: [
+                    if (widget.user.isAdmin)
+                      IconButton(
+                        icon: const Icon(Icons.settings_outlined),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                MemoryWorkSettingsScreen(user: widget.user),
+                          ),
+                        ),
                       ),
-                      child: const Text('Retry'),
-                    ),
                   ],
                 ),
-              );
-            }
+                body: Consumer<MemoryProvider>(
+                  builder: (context, provider, _) {
+                    if (provider.loading) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (provider.error != null) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline,
+                                size: 48, color: Colors.red),
+                            const SizedBox(height: 12),
+                            Text(provider.error!, textAlign: TextAlign.center),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: () => provider.load(
+                                studentId: widget.user.isStudent
+                                    ? widget.user.uid
+                                    : null,
+                              ),
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return _HomeBody(
+                        user: widget.user, provider: provider);
+                  },
+                ),
+              ),
 
-            return _HomeBody(user: widget.user, provider: provider);
-          },
-        ),
+              // Exit Class Mode overlay button
+              if (classModeProvider.isActive)
+                Positioned(
+                  bottom: 20,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: ElevatedButton.icon(
+                      onPressed: () => classModeProvider.exitClassMode(),
+                      icon: const Icon(Icons.exit_to_app, size: 18),
+                      label: const Text('Exit Class Mode'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[700],
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 12),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -351,6 +410,65 @@ class _HomeBody extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+
+        // Mentor: Enter Class Mode + Class Battle
+        if (user.canMentor) ...[
+          const SizedBox(height: 8),
+          Consumer<ClassModeProvider>(
+            builder: (context, classModeProvider, _) {
+              if (classModeProvider.isActive) {
+                // In class mode: show Class Battle button
+                return Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ClassBattleEntryScreen(user: user),
+                          ),
+                        ),
+                        icon: const Icon(Icons.groups_rounded, size: 18),
+                        label: const Text('Class Battle'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.gold,
+                          foregroundColor: AppTheme.navy,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          classModeProvider.enterClassMode(user),
+                      icon: const Icon(Icons.cast_for_education_outlined,
+                          size: 18),
+                      label: const Text('Enter Class Mode'),
+                      style: OutlinedButton.styleFrom(
+                        side:
+                            BorderSide(color: AppTheme.navy),
+                        foregroundColor: AppTheme.navy,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
 
