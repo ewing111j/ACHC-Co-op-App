@@ -17,6 +17,8 @@ import '../feeds/feeds_screen.dart';
 import '../settings/settings_screen.dart';
 import '../admin/admin_screen.dart';
 import '../classes/classes_screen.dart';
+import '../memory/memory_home_screen.dart';
+import '../../providers/memory_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -501,7 +503,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
           seenKey: 'training'),
         _FeatureItem('Memory Work', Icons.auto_stories_outlined,
-          const Color(0xFF1565C0), const _PlaceholderScreen(title: 'Memory Work'),
+          const Color(0xFF1565C0), _MemoryWorkEntry(user: user),
           seenKey: 'memorywork'),
       ];
     }
@@ -541,7 +543,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
         seenKey: 'training'),
       _FeatureItem('Memory Work', Icons.auto_stories_outlined,
-        const Color(0xFF1565C0), const _PlaceholderScreen(title: 'Memory Work'),
+        const Color(0xFF1565C0), _MemoryWorkEntry(user: user),
         seenKey: 'memorywork'),
     ];
   }
@@ -986,6 +988,20 @@ class _NotifItem {
   final bool locked;
   const _NotifItem(this.label, this.icon, this.color, this.key,
       {this.locked = false});
+}
+
+// ── Memory Work Entry — wraps MemoryWorkHomeScreen in MemoryProvider ─────────
+class _MemoryWorkEntry extends StatelessWidget {
+  final UserModel user;
+  const _MemoryWorkEntry({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => MemoryProvider(FirebaseFirestore.instance),
+      child: MemoryWorkHomeScreen(user: user),
+    );
+  }
 }
 
 // ── Placeholder Screen for upcoming features ──────────────────────────────────

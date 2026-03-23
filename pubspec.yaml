@@ -45,6 +45,9 @@ dependencies:
   uuid: 4.5.1
   lottie: 3.1.2
 
+  # Memory Work module
+  just_audio: 0.9.41
+
   # PDF printing
   printing: 5.14.2
   pdf: 3.11.1
@@ -55,6 +58,7 @@ dependencies:
 
   # Connectivity / offline
   connectivity_plus: 6.1.4
+  pdfx: ^2.9.2
 
 dev_dependencies:
   flutter_test:
@@ -69,3 +73,6 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/animations/
+    - assets/lumen/
+    - assets/lumen/cosmetics/
+    - assets/battle/
