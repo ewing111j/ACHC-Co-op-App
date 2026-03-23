@@ -843,22 +843,40 @@ class _HomeworkCardState extends State<_HomeworkCard> {
 
     return GestureDetector(
       onTap: () async {
-        await showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          builder: (_) => HomeworkSheet(
-            classModel: widget.classModel,
-            week: widget.week,
-            user: widget.user,
-            db: widget.db,
-            editHw: hw,
-            existingSubmission: _submission,
-            onSubmissionChanged: () {
-              _loadSubmission();
-            },
-          ),
-        );
+        // Students see the submission/detail view; mentors/admins see the edit view
+        if (widget.user.isStudent) {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkDetailSheet(
+              hw: hw,
+              classModel: widget.classModel,
+              week: widget.week,
+              user: widget.user,
+              db: widget.db,
+              existingSubmission: _submission,
+            ),
+          );
+          _loadSubmission(); // refresh after returning
+        } else {
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => HomeworkSheet(
+              classModel: widget.classModel,
+              week: widget.week,
+              user: widget.user,
+              db: widget.db,
+              editHw: hw,
+              existingSubmission: _submission,
+              onSubmissionChanged: () {
+                _loadSubmission();
+              },
+            ),
+          );
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),

@@ -245,8 +245,8 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
     final viewUid =
         user.isStudent ? user.uid : (_selectedKidUid ?? user.uid);
 
-    // Students only get Weekly tab
-    final tabCount = user.isStudent ? 1 : 2;
+    // All roles get both Weekly and Overview tabs
+    const tabCount = 2;
     if (_tabController.length != tabCount) {
       _tabController.dispose();
       _tabController = TabController(length: tabCount, vsync: this);
@@ -281,14 +281,13 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
-          tabs: [
-            const Tab(
+          tabs: const [
+            Tab(
                 icon: Icon(Icons.calendar_view_week_outlined, size: 18),
                 text: 'Weekly'),
-            if (!user.isStudent)
-              const Tab(
-                  icon: Icon(Icons.list_alt_outlined, size: 18),
-                  text: 'Overview'),
+            Tab(
+                icon: Icon(Icons.list_alt_outlined, size: 18),
+                text: 'Overview'),
           ],
         ),
       ),
@@ -298,48 +297,43 @@ class _AssignmentsScreenState extends State<AssignmentsScreen>
           if ((user.isParent || user.isAdmin) && _students.isNotEmpty)
             _buildStudentSelector(),
           Expanded(
-            child: StreamBuilder<List<AssignmentModel>>(
-              stream:
-                  _firestoreService.streamAssignments(familyId, viewUid),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
-                  return const Center(
-                      child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                      child: Text('Error: ${snapshot.error}',
-                          style:
-                              const TextStyle(color: AppTheme.error)));
-                }
-                final all = snapshot.data ?? [];
-                final kidNames = _buildKidNames();
+            child: Builder(builder: (context) {
+              // Use the merged Provider list which includes family assignments
+              // AND class homework fetched for students.
+              final provider = context.watch<AssignmentsProvider>();
+              if (provider.isLoading && provider.assignments.isEmpty) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (provider.error != null && provider.assignments.isEmpty) {
+                return Center(
+                    child: Text('Error: ${provider.error}',
+                        style: const TextStyle(color: AppTheme.error)));
+              }
+              final all = provider.assignments;
+              final kidNames = _buildKidNames();
 
-                return TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _WeeklyTab(
-                      assignments: all,
-                      user: user,
-                      db: _db,
-                      kidNames: kidNames,
-                      moodleConfigured: _moodleService.isConfigured,
-                      onMoodleSetup: _showMoodleSetup,
-                    ),
-                    if (!user.isStudent)
-                      _OverviewTab(
-                        assignments: all,
-                        user: user,
-                        db: _db,
-                        kidNames: kidNames,
-                        moodleConfigured: _moodleService.isConfigured,
-                        onMoodleSetup: _showMoodleSetup,
-                      ),
-                  ],
-                );
-              },
-            ),
+              return TabBarView(
+                controller: _tabController,
+                children: [
+                  _WeeklyTab(
+                    assignments: all,
+                    user: user,
+                    db: _db,
+                    kidNames: kidNames,
+                    moodleConfigured: _moodleService.isConfigured,
+                    onMoodleSetup: _showMoodleSetup,
+                  ),
+                  _OverviewTab(
+                    assignments: all,
+                    user: user,
+                    db: _db,
+                    kidNames: kidNames,
+                    moodleConfigured: _moodleService.isConfigured,
+                    onMoodleSetup: _showMoodleSetup,
+                  ),
+                ],
+              );
+            }),
           ),
         ],
       ),
@@ -811,15 +805,12 @@ class _OverviewTabState extends State<_OverviewTab> {
                     ],
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(14),
-                  itemCount: items.length,
-                  itemBuilder: (ctx, i) => _AssignmentCard(
-                    assignment: items[i],
-                    user: widget.user,
-                    db: widget.db,
-                    kidNames: widget.kidNames,
-                  ),
+              : _CourseGroupedList(
+                  assignments: items,
+                  user: widget.user,
+                  db: widget.db,
+                  kidNames: widget.kidNames,
+                  initiallyExpanded: true,
                 ),
         ),
       ],
