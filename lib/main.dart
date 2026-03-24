@@ -10,6 +10,7 @@ import 'providers/assignments_provider.dart';
 import 'providers/classes_provider.dart';
 import 'providers/memory_provider.dart';
 import 'providers/class_mode_provider.dart';
+import 'providers/selected_child_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
@@ -56,6 +57,7 @@ class AchcHubApp extends StatelessWidget {
           create: (_) => MemoryProvider(FirebaseFirestore.instance)),
         ChangeNotifierProvider(
           create: (_) => ClassModeProvider(FirebaseFirestore.instance)),
+        ChangeNotifierProvider(create: (_) => SelectedChildProvider()),
       ],
       child: MaterialApp(
         title: 'ACHC Hub',

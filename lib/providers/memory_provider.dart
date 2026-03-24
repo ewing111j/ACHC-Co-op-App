@@ -27,6 +27,11 @@ class MemoryProvider extends ChangeNotifier {
   Map<String, StudentProgressModel> _progressMap = {}; // key = memory_item_id
   List<AchievementModel> _achievements = [];
 
+  // ── Level-Up Notifier (P1-4) ─────────────────────────────────────────────
+  // UI listens to this ValueNotifier to trigger LevelUpOverlay.
+  // Value is the NEW level number, null when no level-up has occurred.
+  final ValueNotifier<int?> levelUpNotifier = ValueNotifier<int?>(null);
+
   // ── Getters ───────────────────────────────────────────────────────────────
   bool get loading => _loading;
   String? get error => _error;
@@ -279,6 +284,12 @@ class MemoryProvider extends ChangeNotifier {
 
     final didLevelUp = newLevel > _lumenState!.lumenLevel;
     _lumenState = updated;
+
+    // Fire level-up notifier so UI can show overlay (P1-4)
+    if (didLevelUp) {
+      levelUpNotifier.value = newLevel;
+    }
+
     notifyListeners();
 
     return didLevelUp ? updated : null; // return non-null if leveled up
@@ -433,6 +444,56 @@ class MemoryProvider extends ChangeNotifier {
     if (_studentId != null) {
       _loadStudentData(_studentId!).then((_) => notifyListeners());
     }
+  }
+
+  /// Batch award WP to a list of student IDs (P1-5: Class Battle win).
+  /// Writes to each student's lumen_state doc without loading full state.
+  Future<void> classBattleAwardWP(
+      List<String> studentIds, int wpAmount) async {
+    if (studentIds.isEmpty || wpAmount <= 0) return;
+
+    final batch = _db.batch();
+
+    for (final studentId in studentIds) {
+      // Fetch current lumen_state for each student
+      final snap = await _db
+          .collection('lumen_state')
+          .where('student_id', isEqualTo: studentId)
+          .where('cycle_id', isEqualTo: activeCycleId)
+          .where('is_active', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (snap.docs.isEmpty) continue;
+
+      final doc = snap.docs.first;
+      final current = doc.data();
+      final currentWp = (current['current_wp'] as int? ?? 0) + wpAmount;
+      final totalWp = (current['total_wp'] as int? ?? 0) + wpAmount;
+
+      // Check level-up using same thresholds
+      int level = current['lumen_level'] as int? ?? 1;
+      final thresholds = LumenStateModel.levelThresholds;
+      while (level < 5 &&
+          level < thresholds.length &&
+          currentWp >= thresholds[level]) {
+        level++;
+      }
+
+      batch.update(doc.reference, {
+        'current_wp': currentWp,
+        'total_wp': totalWp,
+        'lumen_level': level,
+      });
+    }
+
+    await batch.commit();
+  }
+
+  @override
+  void dispose() {
+    levelUpNotifier.dispose();
+    super.dispose();
   }
 }
 

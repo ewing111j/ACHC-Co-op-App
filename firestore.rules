@@ -1,0 +1,207 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACHC Hub — Consolidated Firestore Security Rules
+// Phase 1 — covers all collections created through P1-1 to P1-8
+//
+// ROLE HIERARCHY (stored on the user document in /users/{uid}):
+//   role == "admin"   → full read/write on everything
+//   role == "parent"  → read most data, write own records
+//   role == "student" → read memory work content only
+//
+// HELPER FUNCTIONS are defined in the service block below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ─────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isParent() {
+      return isSignedIn()
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent';
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdminOrParent() {
+      return isAdmin() || isParent();
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Memory Settings (global config) ──────────────────────────────────────
+    match /memory_settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Subjects ──────────────────────────────────────────────────────────────
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Memory Items (content cards) ──────────────────────────────────────────
+    match /memory_items/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Student Progress (per-student memory-work progress) ───────────────────
+    match /student_progress/{studentId} {
+      allow read: if isOwner(studentId) || isAdminOrParent();
+      allow write: if isOwner(studentId) || isAdmin();
+    }
+
+    // ── Lumen State (WP, level, cosmetics) ────────────────────────────────────
+    match /lumen_state/{studentId} {
+      allow read: if isOwner(studentId) || isAdminOrParent();
+      allow write: if isOwner(studentId) || isAdmin();
+    }
+
+    // ── Achievements ─────────────────────────────────────────────────────────
+    match /achievements/{studentId} {
+      allow read: if isOwner(studentId) || isAdminOrParent();
+      allow write: if isOwner(studentId) || isAdmin();
+
+      match /earned/{achievementId} {
+        allow read: if isOwner(studentId) || isAdminOrParent();
+        allow write: if isOwner(studentId) || isAdmin();
+      }
+    }
+
+    // ── Parent Audio Log ──────────────────────────────────────────────────────
+    match /parent_audio_log/{logId} {
+      allow read: if isAdminOrParent();
+      allow create: if isAdminOrParent();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Volunteer Rotations (P1-1) ────────────────────────────────────────────
+    match /volunteer_rotations/{rotId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Mentor Absences (P1-2) ────────────────────────────────────────────────
+    match /mentor_absences/{absenceId} {
+      // Any signed-in parent can read (to know if coverage is needed)
+      allow read: if isSignedIn();
+      // Mentors (parents) can create their own absence reports
+      allow create: if isAdminOrParent()
+          && request.resource.data.mentor_uid == request.auth.uid;
+      // Mentor can update their own; admin can update any
+      allow update: if isAdmin()
+          || (isAdminOrParent()
+              && resource.data.mentor_uid == request.auth.uid);
+      // Only admin or owning mentor can delete
+      allow delete: if isAdmin()
+          || resource.data.mentor_uid == request.auth.uid;
+    }
+
+    // ── Coverage Volunteers (P1-2) ────────────────────────────────────────────
+    match /coverage_volunteers/{volId} {
+      allow read: if isSignedIn();
+      // Parent can volunteer themselves
+      allow create: if isAdminOrParent()
+          && request.resource.data.volunteer_uid == request.auth.uid;
+      // Only admin can accept (set accepted=true)
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Assignments / Moodle Sync ─────────────────────────────────────────────
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Messages ─────────────────────────────────────────────────────────────
+    match /messages/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+
+      match /chat/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin()
+            || resource.data.sender_uid == request.auth.uid;
+      }
+    }
+
+    // ── Calendar Events ───────────────────────────────────────────────────────
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Photos ────────────────────────────────────────────────────────────────
+    match /photos/{photoId} {
+      allow read: if isSignedIn();
+      allow create: if isAdminOrParent();
+      allow update, delete: if isAdmin()
+          || resource.data.uploader_uid == request.auth.uid;
+    }
+
+    // ── Feeds / Announcements ─────────────────────────────────────────────────
+    match /feeds/{feedId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Check-In Records ──────────────────────────────────────────────────────
+    match /checkin_records/{recordId} {
+      allow read: if isAdminOrParent();
+      allow create: if isAdminOrParent();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Files / Documents ─────────────────────────────────────────────────────
+    match /files/{fileId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Classes ───────────────────────────────────────────────────────────────
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+
+      match /announcements/{annId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
+    }
+
+    // ── Cloze Overrides (Phase 2 — rules pre-created here for forward compat) ─
+    match /cloze_overrides/{overrideId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Battle Enemies (Phase 3) ──────────────────────────────────────────────
+    match /battle_enemies/{enemyId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+  }
+}

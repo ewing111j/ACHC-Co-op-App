@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/user_model.dart';
 import '../../models/memory/memory_models.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/app_animations.dart';
+import '../../widgets/lumen_home_panel.dart';
+import '../../widgets/wp_counter_widget.dart';
 import 'cloze_text_widget.dart';
+import 'victory_screen.dart';
+import 'defeat_screen.dart';
 
 class BattleScreen extends StatefulWidget {
   final UserModel user;
@@ -106,64 +112,29 @@ class _BattleScreenState extends State<BattleScreen> {
   }
 
   Future<void> _onVictory() async {
-    // +30 WP for win
-    await context.read<MemoryProvider>().awardWP(30);
+    final wpEarned = 30;
+    await context.read<MemoryProvider>().awardWP(wpEarned);
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('⭐ Victory!',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('🎉 You defeated the enemy!',
-                style: TextStyle(fontSize: 16)),
-            SizedBox(height: 8),
-            Text('+30 Wisdom Points earned!',
-                style: TextStyle(color: Colors.orange)),
-          ],
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VictoryScreen(
+          user: widget.user,
+          wpEarned: wpEarned,
+          enemyName: widget.enemyName,
         ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.navy,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Done'),
-          ),
-        ],
       ),
     );
   }
 
   void _onDefeat() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Lumen retreats...'),
-        content: const Text(
-          'Keep studying and try again!',
-          style: TextStyle(fontSize: 15),
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DefeatScreen(
+          user: widget.user,
+          enemyName: widget.enemyName,
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
-          ),
-        ],
       ),
     );
   }
@@ -199,11 +170,14 @@ class _BattleScreenState extends State<BattleScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                // Lumen
+                // Lumen — uses LumenHomePanel (Animation 1)
                 Expanded(
                   child: Column(
                     children: [
-                      const Text('🕯️', style: TextStyle(fontSize: 36)),
+                      LumenHomePanel(
+                        level: context.watch<MemoryProvider>().lumenState?.lumenLevel ?? 1,
+                        width: 60,
+                      ),
                       const Text('Lumen',
                           style: TextStyle(
                               color: Colors.white,
@@ -220,12 +194,20 @@ class _BattleScreenState extends State<BattleScreen> {
                 ),
                 const Text('⚡',
                     style: TextStyle(fontSize: 28, color: Colors.white)),
-                // Enemy
+                // Enemy — Animation 6: slide-in from right on load
                 Expanded(
                   child: Column(
                     children: [
                       Text(widget.enemyEmoji,
-                          style: const TextStyle(fontSize: 36)),
+                          style: const TextStyle(fontSize: 36))
+                          .animate(key: ValueKey(_index))
+                          .moveX(
+                            begin: AppAnimations.enemyEnterOffsetX,
+                            end: 0,
+                            duration: AppAnimations.enemyEnterDuration,
+                            curve: AppAnimations.enemyEnterCurve,
+                          )
+                          .fadeIn(duration: AppAnimations.enemyEnterDuration),
                       Text(widget.enemyName,
                           style: const TextStyle(
                               color: Colors.white,
@@ -233,6 +215,7 @@ class _BattleScreenState extends State<BattleScreen> {
                               fontWeight: FontWeight.w600),
                           textAlign: TextAlign.center),
                       const SizedBox(height: 4),
+                      // Enemy HP orbs — animate out when hit (Animation 7)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: List.generate(_enemyOrbs, (_) =>

@@ -19,6 +19,10 @@ import '../admin/admin_screen.dart';
 import '../classes/classes_screen.dart';
 import '../memory/memory_home_screen.dart';
 import '../../providers/memory_provider.dart';
+import '../../widgets/volunteer_rotation_card.dart';
+import '../coverage/coverage_screen.dart';
+import '../../models/coverage_models.dart';
+import '../../services/coverage_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -110,6 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (!user.isStudent) _buildWelcomeBanner(user),
                       if (!user.isStudent) const SizedBox(height: 20),
                       _buildFeatureGrid(context, user),
+                      if (!user.isStudent) ...[const SizedBox(height: 20), const VolunteerRotationCard()],
+                      if (!user.isStudent) ...[const SizedBox(height: 12), _CoverageBanner()],
                       if (user.isAdmin) ...[
                         const SizedBox(height: 24),
                         _buildAdminBanner(context),
@@ -1061,6 +1067,58 @@ class _PlaceholderScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Coverage Banner ───────────────────────────────────────────────────────────
+// Shows a compact banner on the HomeScreen when there are open absences.
+class _CoverageBanner extends StatelessWidget {
+  const _CoverageBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final service = CoverageService();
+    return StreamBuilder<List<MentorAbsenceModel>>(
+      stream: service.streamOpenAbsences(),
+      builder: (context, snap) {
+        final count = snap.data?.length ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return InkWell(
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const CoverageScreen())),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    color: Colors.orange.shade700, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '$count class${count == 1 ? '' : 'es'} need${count == 1 ? 's' : ''} a substitute — tap to volunteer',
+                    style: TextStyle(
+                        color: Colors.orange.shade800,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13),
+                  ),
+                ),
+                Icon(Icons.chevron_right,
+                    color: Colors.orange.shade700, size: 20),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

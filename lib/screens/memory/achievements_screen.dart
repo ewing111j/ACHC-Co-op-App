@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/user_model.dart';
 import '../../models/memory/memory_models.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/app_animations.dart';
+import '../../widgets/lumen_home_panel.dart';
+import '../../widgets/wp_counter_widget.dart';
 
 class AchievementsScreen extends StatelessWidget {
   final UserModel user;
@@ -47,18 +51,21 @@ class AchievementsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // Subject achievements
-            ...AchievementModel.labels.entries.map((entry) {
-              final earned = earnedTypes.contains(entry.key);
+            // Subject achievements — staggered entrance animation
+            ...AchievementModel.labels.entries.toList().asMap().entries.map((entry) {
+              final i = entry.key;
+              final mapEntry = entry.value;
+              final earned = earnedTypes.contains(mapEntry.key);
               final achievementData = earned
                   ? achievements
-                      .firstWhere((a) => a.achievementType == entry.key)
+                      .firstWhere((a) => a.achievementType == mapEntry.key)
                   : null;
               return _AchievementTile(
-                type: entry.key,
-                label: entry.value,
+                type: mapEntry.key,
+                label: mapEntry.value,
                 earned: earned,
                 achievement: achievementData,
+                animationIndex: i,
               );
             }),
           ],
@@ -80,47 +87,26 @@ class _LumenSummary extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Text(
-              _emoji(state.lumenLevel),
-              style: const TextStyle(fontSize: 40),
+            // Animated Lumen Avatar (Animation 2)
+            LumenHomePanel(
+              level: state.lumenLevel,
+              width: 72,
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Lumen — ${state.levelName}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: AppTheme.navy,
-                    ),
-                  ),
-                  Text('Level ${state.lumenLevel} · ${state.totalWp} total WP',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: state.levelProgress.clamp(0.0, 1.0),
-                      backgroundColor: Colors.grey[200],
-                      color: AppTheme.gold,
-                      minHeight: 8,
-                    ),
-                  ),
-                ],
+              child: WPCounterWithProgressWidget(
+                wp: state.totalWp,
+                level: state.lumenLevel,
+                wpForNextLevel: state.wpNeededForNextLevel,
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  String _emoji(int level) {
-    const emojis = ['🕯️', '📜', '🎓', '⚔️', '👑'];
-    return emojis[(level - 1).clamp(0, 4)];
+    ).animate()
+        .fadeIn(duration: AppAnimations.cardFadeInDuration)
+        .moveY(begin: AppAnimations.cardEntranceMoveY, end: 0,
+               duration: AppAnimations.cardFadeInDuration);
   }
 }
 
@@ -129,12 +115,14 @@ class _AchievementTile extends StatelessWidget {
   final String label;
   final bool earned;
   final AchievementModel? achievement;
+  final int animationIndex;
 
   const _AchievementTile({
     required this.type,
     required this.label,
     required this.earned,
     this.achievement,
+    this.animationIndex = 0,
   });
 
   @override
@@ -167,6 +155,12 @@ class _AchievementTile extends StatelessWidget {
             ? const Icon(Icons.check_circle, color: Colors.green, size: 20)
             : const Icon(Icons.lock_outline, color: Colors.grey, size: 18),
       ),
+    ).animate(
+      delay: AppAnimations.staggerItemDelay * animationIndex,
+    ).fadeIn().scale(
+      begin: const Offset(0.95, 0.95),
+      end: const Offset(1.0, 1.0),
+      duration: AppAnimations.cardFadeInDuration,
     );
   }
 

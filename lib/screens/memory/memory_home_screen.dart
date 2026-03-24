@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../../models/memory/memory_models.dart';
 import '../../models/user_model.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/app_animations.dart';
+import '../../widgets/lumen_home_panel.dart';
+import '../../widgets/wp_counter_widget.dart';
+import '../../widgets/level_up_overlay.dart';
 import 'content_card_screen.dart';
 import 'by_unit_screen.dart';
 import 'by_subject_screen.dart';
@@ -47,8 +52,9 @@ class _MemoryWorkHomeScreenState extends State<MemoryWorkHomeScreen> {
               : null);
       _provider.load(studentId: studentId);
 
-      // If this student has Young Learner mode on, redirect immediately
-      // after the frame so the provider has time to initialize.
+      // Listen for level-up events and show overlay (P1-4)
+      _provider.levelUpNotifier.addListener(_onLevelUp);
+
       if (widget.user.isYoungLearner) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -63,6 +69,24 @@ class _MemoryWorkHomeScreenState extends State<MemoryWorkHomeScreen> {
         });
       }
     });
+  }
+
+  void _onLevelUp() {
+    final newLevel = _provider.levelUpNotifier.value;
+    if (newLevel != null && mounted) {
+      showLevelUpOverlay(context, newLevel);
+      // Reset so next level-up fires correctly
+      Future.microtask(() => _provider.levelUpNotifier.value = null);
+    }
+  }
+
+  @override
+  void dispose() {
+    // Safe to remove: provider may have been disposed already
+    try {
+      _provider.levelUpNotifier.removeListener(_onLevelUp);
+    } catch (_) {}
+    super.dispose();
   }
 
   @override
@@ -502,20 +526,11 @@ class _LumenPanel extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            // Lumen icon placeholder (will be replaced with actual image assets)
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppTheme.navy.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  _levelEmoji(level),
-                  style: const TextStyle(fontSize: 36),
-                ),
-              ),
+            // Animated Lumen Home Panel (Animation 1)
+            LumenHomePanel(
+              level: level,
+              width: 80,
+              onTap: () {}, // tap handled by Achievements button below
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -556,19 +571,27 @@ class _LumenPanel extends StatelessWidget {
                     style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                   ),
                   const SizedBox(height: 8),
+                  // Animated WP counter
+                  WPCounterWidget(wp: totalWp, fontSize: 18),
+                  const SizedBox(height: 6),
                   // WP progress bar
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: progress.clamp(0.0, 1.0),
-                      backgroundColor: Colors.grey[200],
-                      color: AppTheme.gold,
-                      minHeight: 8,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: progress.clamp(0.0, 1.0)),
+                      duration: const Duration(milliseconds: 800),
+                      curve: Curves.easeOutCubic,
+                      builder: (_, val, __) => LinearProgressIndicator(
+                        value: val,
+                        backgroundColor: Colors.grey[200],
+                        color: AppTheme.gold,
+                        minHeight: 8,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '$wpProgress / $wpNeeded WP · Total: $totalWp WP',
+                    '$wpProgress / $wpNeeded WP to next level',
                     style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                   ),
                 ],
@@ -577,24 +600,10 @@ class _LumenPanel extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-
-  String _levelEmoji(int level) {
-    switch (level) {
-      case 1:
-        return '🕯️';
-      case 2:
-        return '📜';
-      case 3:
-        return '🎓';
-      case 4:
-        return '⚔️';
-      case 5:
-        return '👑';
-      default:
-        return '🕯️';
-    }
+    ).animate()
+        .fadeIn(duration: AppAnimations.cardFadeInDuration)
+        .moveY(begin: AppAnimations.cardEntranceMoveY, end: 0,
+               duration: AppAnimations.cardFadeInDuration);
   }
 }
 

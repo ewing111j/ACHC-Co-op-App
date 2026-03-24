@@ -8,7 +8,7 @@ import '../../models/user_model.dart';
 import '../../models/memory/memory_models.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
-import 'child_switcher_pill.dart';
+import '../../widgets/child_switcher_pill.dart';
 import 'content_card_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────

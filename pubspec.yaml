@@ -43,7 +43,8 @@ dependencies:
   shimmer: 3.0.0
   timeago: 3.7.0
   uuid: 4.5.1
-  lottie: 3.1.2
+  # Animations (flutter_animate only — no rive, no lottie)
+  flutter_animate: ^4.5.0
 
   # Memory Work module
   just_audio: 0.9.41
@@ -76,3 +77,4 @@ flutter:
     - assets/lumen/
     - assets/lumen/cosmetics/
     - assets/battle/
+    - assets/subjects/
