@@ -217,8 +217,34 @@ class _ByUnitScreenState extends State<ByUnitScreen> with ChildSwitcherMixin {
           Consumer<MemoryProvider>(builder: (context, provider, _) {
             final units = provider.units;
             final subjects = provider.subjects;
-            if (units.isEmpty) {
+            if (provider.loading) {
               return const Center(child: CircularProgressIndicator());
+            }
+            if (units.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.view_week_outlined, size: 56, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text(
+                        'No units loaded yet.',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
+                            color: Colors.black54),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Units will appear here once your admin\nhas set up the memory work curriculum.',
+                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
             }
             return Column(
               children: [

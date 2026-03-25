@@ -87,8 +87,34 @@ class _BySubjectScreenState extends State<BySubjectScreen>
       ),
       body: Consumer<MemoryProvider>(builder: (context, provider, _) {
         final subjects = provider.subjects;
-        if (subjects.isEmpty) {
+        if (provider.loading) {
           return const Center(child: CircularProgressIndicator());
+        }
+        if (subjects.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.auto_stories_outlined, size: 56, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'No subjects loaded yet.',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
+                        color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Subjects will appear here once your admin\nhas set up the memory work curriculum.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
         }
         return GridView.builder(
           padding: const EdgeInsets.all(16),

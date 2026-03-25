@@ -283,7 +283,7 @@ class _LoginScreenState extends State<LoginScreen>
             decoration: const InputDecoration(
               labelText: 'Your First Name',
               prefixIcon: Icon(Icons.person_outline, size: 18),
-              hintText: 'e.g. Emma',
+              hintText: 'e.g. Emma (first name is enough)',
             ),
             validator: (v) => (v == null || v.isEmpty) ? 'Enter your name' : null,
           ),

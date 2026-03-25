@@ -55,9 +55,14 @@ class AuthService {
         if (kidDoc.exists) {
           final kidData = kidDoc.data()!;
           final storedName = (kidData['displayName'] as String? ?? '').toLowerCase();
-          if (storedName == kidName.toLowerCase().trim()) {
-            // Sign in student with their email
-            final kidEmail = _buildKidEmail(parentEmail, kidName);
+          final inputName = kidName.toLowerCase().trim();
+          // Match on full name OR just the first name (first token)
+          final storedFirst = storedName.split(' ').first;
+          final inputFirst = inputName.split(' ').first;
+          if (storedName == inputName || storedFirst == inputFirst) {
+            // Always build email from the stored full name so the
+            // Firebase account is found correctly
+            final kidEmail = _buildKidEmail(parentEmail, storedName);
             try {
               final cred = await _auth.signInWithEmailAndPassword(
                   email: kidEmail, password: kidPassword);

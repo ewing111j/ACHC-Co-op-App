@@ -767,8 +767,24 @@ class _SubjectTile extends StatelessWidget {
   }
 
   String _shortName(String name) {
-    if (name.length <= 10) return name;
-    return name.split(' ').first;
+    // Hardcoded abbreviations for known long names
+    const abbrev = {
+      'Great Words I':   'GW I',
+      'Great Words II':  'GW II',
+      'Great Words 1':   'GW I',
+      'Great Words 2':   'GW II',
+      'great_words_1':   'GW I',
+      'great_words_2':   'GW II',
+    };
+    if (abbrev.containsKey(name)) return abbrev[name]!;
+    if (name.length <= 12) return name;
+    // Fallback: first word of each token that is capitalised
+    final words = name.split(' ');
+    if (words.length >= 2) {
+      return '${words[0][0].toUpperCase()}${words[0].substring(1)} '
+             '${words.last}';
+    }
+    return name.substring(0, 10);
   }
 }
 
