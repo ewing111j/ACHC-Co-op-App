@@ -8,6 +8,7 @@ import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
 import '../../widgets/lumen_home_panel.dart';
 import '../../widgets/lumen_hearts_bar.dart';
+import '../../widgets/enemy_orbs_bar.dart';
 import 'cloze_text_widget.dart';
 import 'victory_screen.dart';
 import 'defeat_screen.dart';
@@ -219,11 +220,11 @@ class _BattleScreenState extends State<BattleScreen> {
                               fontWeight: FontWeight.w600),
                           textAlign: TextAlign.center),
                       const SizedBox(height: 4),
-                      // Enemy HP orbs — animate out when hit (Animation 7)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(_enemyOrbs, (_) =>
-                          const Text('🔮', style: TextStyle(fontSize: 14))),
+                      // Enemy HP orbs — pre-rendered bar image (Animation 7)
+                      EnemyOrbsBar(
+                        currentOrbs: _enemyOrbs,
+                        maxOrbs: widget.enemyOrbs,
+                        width: 110,
                       ),
                     ],
                   ),
