@@ -9,17 +9,26 @@ import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// YoungLearnerHomeScreen
-//
-// Simplified home for students with is_young_learner = true.
-// Large subject icons, no cloze, no battle/drill, simple "We practiced this!"
+// Subject image asset paths (used in Young Learner mode)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class YoungLearnerHomeScreen extends StatelessWidget {
-  final UserModel user;
-  const YoungLearnerHomeScreen({super.key, required this.user});
+class _SubjectAssets {
+  static const Map<String, String> images = {
+    'religion':    'assets/subjects/religion.png',
+    'scripture':   'assets/subjects/scripture.png',
+    'latin':       'assets/subjects/latin.png',
+    'grammar':     'assets/subjects/grammar.png',
+    'history':     'assets/subjects/history.png',
+    'science':     'assets/subjects/science.png',
+    'math':        'assets/subjects/math.png',
+    'geography':   'assets/subjects/geography.png',
+    'great_words_1': 'assets/subjects/great_words_1.png',
+    'great_words_2': 'assets/subjects/great_words_2.png',
+    'timeline':    'assets/subjects/timeline.png',
+  };
 
-  static const Map<String, String> _icons = {
+  // Emoji fallback if image fails to load
+  static const Map<String, String> fallbackEmoji = {
     'religion': '✝️',
     'scripture': '📖',
     'latin': '🏛️',
@@ -32,6 +41,18 @@ class YoungLearnerHomeScreen extends StatelessWidget {
     'great_words_2': '📝',
     'timeline': '⏳',
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// YoungLearnerHomeScreen
+//
+// Simplified home for students with is_young_learner = true.
+// Large subject icons, no cloze, no battle/drill, simple "We practiced this!"
+// ─────────────────────────────────────────────────────────────────────────────
+
+class YoungLearnerHomeScreen extends StatelessWidget {
+  final UserModel user;
+  const YoungLearnerHomeScreen({super.key, required this.user});
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +117,8 @@ class YoungLearnerHomeScreen extends StatelessWidget {
                   final s = subjects[i];
                   return _YoungSubjectTile(
                     subject: s,
-                    icon: _icons[s.id] ?? '📚',
+                    imagePath: _SubjectAssets.images[s.id],
+                    fallbackEmoji: _SubjectAssets.fallbackEmoji[s.id] ?? '📚',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -122,12 +144,14 @@ class YoungLearnerHomeScreen extends StatelessWidget {
 
 class _YoungSubjectTile extends StatelessWidget {
   final SubjectModel subject;
-  final String icon;
+  final String? imagePath;
+  final String fallbackEmoji;
   final VoidCallback onTap;
 
   const _YoungSubjectTile({
     required this.subject,
-    required this.icon,
+    required this.imagePath,
+    required this.fallbackEmoji,
     required this.onTap,
   });
 
@@ -136,22 +160,37 @@ class _YoungSubjectTile extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Card(
-        elevation: 3,
+        elevation: 4,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         color: Colors.white,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(icon, style: const TextStyle(fontSize: 44)),
-              const SizedBox(height: 10),
+              // Subject image (real PNG) with emoji fallback
+              Expanded(
+                child: imagePath != null
+                    ? Image.asset(
+                        imagePath!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Text(
+                          fallbackEmoji,
+                          style: const TextStyle(fontSize: 44),
+                        ),
+                      )
+                    : Text(
+                        fallbackEmoji,
+                        style: const TextStyle(fontSize: 44),
+                      ),
+              ),
+              const SizedBox(height: 8),
               Text(
                 subject.name,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF1B2A4A),
                 ),
@@ -286,6 +325,8 @@ class _YoungLearnerContentCardState extends State<YoungLearnerContentCard> {
   @override
   Widget build(BuildContext context) {
     final subjectName = widget.subjectId.replaceAll('_', ' ');
+    final imagePath = _SubjectAssets.images[widget.subjectId];
+    final fallbackEmoji = _SubjectAssets.fallbackEmoji[widget.subjectId] ?? '📚';
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8E1),
@@ -308,6 +349,25 @@ class _YoungLearnerContentCardState extends State<YoungLearnerContentCard> {
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
+                        // Subject image at top — large and centered
+                        SizedBox(
+                          height: 110,
+                          child: imagePath != null
+                              ? Image.asset(
+                                  imagePath,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => Text(
+                                    fallbackEmoji,
+                                    style: const TextStyle(fontSize: 64),
+                                  ),
+                                )
+                              : Text(
+                                  fallbackEmoji,
+                                  style: const TextStyle(fontSize: 64),
+                                ),
+                        ),
+                        const SizedBox(height: 12),
+
                         const Spacer(),
 
                         // Content text (optional, revealed via long-press)
