@@ -6,6 +6,7 @@ import '../../utils/app_theme.dart';
 import 'manage_members_screen.dart';
 import 'attendance_history_screen.dart';
 import 'coop_calendar_screen.dart';
+import 'admin_analytics_screen.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -217,6 +218,13 @@ class _AdminScreenState extends State<AdminScreen> {
         'color': const Color(0xFF7B1FA2),
         'action': () => Navigator.push(context,
             MaterialPageRoute(builder: (_) => const CoopCalendarScreen())),
+      },
+      {
+        'icon': Icons.bar_chart_outlined,
+        'label': 'Analytics\nDashboard',
+        'color': AppTheme.checkInColor,
+        'action': () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const AdminAnalyticsScreen())),
       },
     ];
 

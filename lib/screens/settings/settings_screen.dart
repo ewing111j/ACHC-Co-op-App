@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
@@ -19,13 +20,28 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, bool> _notifPrefs = {};
-  bool _notifyDuties = true; // P2-7: duty reminder preference
+  bool _notifyDuties = true;   // P2-7: duty reminder preference
+  bool _reciteEnabled = false; // P3-1: speech recite check feature flag
 
   @override
   void initState() {
     super.initState();
     _loadNotifPrefs();
     _loadDutyNotifPref();
+    _loadReciteFlag();
+  }
+
+  // P3-1: Recite check feature flag
+  Future<void> _loadReciteFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getBool('recite_check_enabled') ?? false;
+    if (mounted) setState(() => _reciteEnabled = v);
+  }
+
+  Future<void> _setReciteFlag(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('recite_check_enabled', value);
+    if (mounted) setState(() => _reciteEnabled = value);
   }
 
   Future<void> _loadNotifPrefs() async {
@@ -271,6 +287,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: const Text('Choose which sections show a badge'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 14),
                     onTap: () => _showNotifSettings(context),
+                  ),
+                  const Divider(height: 1, indent: 72),
+                  // P3-1: Recite Check feature flag
+                  ListTile(
+                    leading: const Icon(Icons.record_voice_over_outlined,
+                        color: AppTheme.navy),
+                    title: const Text('Recite Check'),
+                    subtitle: const Text(
+                        'Show a \'Recite\' button on memory cards to verify recitation by voice'),
+                    isThreeLine: true,
+                    trailing: Switch(
+                      value: _reciteEnabled,
+                      activeTrackColor: AppTheme.navy,
+                      activeThumbColor: AppTheme.navy,
+                      onChanged: _setReciteFlag,
+                    ),
                   ),
                   const Divider(height: 1, indent: 72),
                   // P2-7: Duty reminder toggle

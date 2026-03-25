@@ -10,6 +10,8 @@ import '../../utils/app_theme.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/class_mode_provider.dart';
 import '../../services/cloze_override_service.dart';
+import '../../services/verification_service.dart';
+import '../../widgets/speech_recording_widget.dart';
 import 'cloze_text_widget.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +59,10 @@ class _ContentCardScreenState extends State<ContentCardScreen> {
   bool _ratingSubmitted = false;
   int? _priorRating;
 
+  // P3-1: Recite check
+  bool _reciteEnabled = false;   // feature flag loaded from SharedPrefs
+  bool _showReciteWidget = false;
+
   // Audio
   final AudioPlayer _sungPlayer = AudioPlayer();
   final AudioPlayer _spokenPlayer = AudioPlayer();
@@ -73,6 +79,32 @@ class _ContentCardScreenState extends State<ContentCardScreen> {
     _loadClozeLevel();
     _loadItem();
     _setupAudioListeners();
+    _loadReciteFlag();
+  }
+
+  Future<void> _loadReciteFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool('recite_check_enabled') ?? false;
+    if (mounted) setState(() => _reciteEnabled = enabled);
+  }
+
+  Future<void> _handleReciteResult(VerificationResult result) async {
+    if (result.wpBonus > 0) {
+      await context.read<MemoryProvider>().awardWP(result.wpBonus);
+    }
+    if (!mounted) return;
+    // Log the attempt in progress (mastery bump only if pass/partial)
+    if (_item != null &&
+        (result.outcome == ReciteOutcome.pass ||
+            result.outcome == ReciteOutcome.partial)) {
+      await context.read<MemoryProvider>().updateProgress(
+        memoryItemId: _item!.id,
+        masteryLevel: result.outcome == ReciteOutcome.pass ? 3 : 2,
+        wpEarned: result.wpBonus,
+        sungPlayedFirst: false,
+      );
+    }
+    // Keep the widget visible so the student sees the result; they dismiss it
   }
 
   @override
@@ -424,6 +456,13 @@ class _ContentCardScreenState extends State<ContentCardScreen> {
                       onSungTap: _toggleSungAudio,
                       onSpokenTap: _toggleSpokenAudio,
                       onRate: _submitRating,
+                      reciteEnabled: _reciteEnabled,
+                      showReciteWidget: _showReciteWidget,
+                      onReciteTap: () =>
+                          setState(() => _showReciteWidget = true),
+                      onReciteDismiss: () =>
+                          setState(() => _showReciteWidget = false),
+                      onReciteResult: _handleReciteResult,
                     ),
     );
   }
@@ -449,6 +488,12 @@ class _CardBody extends StatelessWidget {
   final VoidCallback onSungTap;
   final VoidCallback onSpokenTap;
   final ValueChanged<int> onRate;
+  // P3-1
+  final bool reciteEnabled;
+  final bool showReciteWidget;
+  final VoidCallback onReciteTap;
+  final VoidCallback onReciteDismiss;
+  final ValueChanged<VerificationResult> onReciteResult;
 
   const _CardBody({
     required this.item,
@@ -468,6 +513,11 @@ class _CardBody extends StatelessWidget {
     required this.onSungTap,
     required this.onSpokenTap,
     required this.onRate,
+    required this.reciteEnabled,
+    required this.showReciteWidget,
+    required this.onReciteTap,
+    required this.onReciteDismiss,
+    required this.onReciteResult,
   });
 
   String _formatDuration(Duration? d) {
@@ -636,7 +686,33 @@ class _CardBody extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
+
+          // P3-1: Recite Check button (only when feature flag on)
+          if (reciteEnabled) ...[
+            if (!showReciteWidget)
+              OutlinedButton.icon(
+                onPressed: onReciteTap,
+                icon: const Icon(Icons.record_voice_over_outlined, size: 18),
+                label: const Text('Recite Check'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.navy,
+                  side: BorderSide(color: AppTheme.navy.withValues(alpha: 0.6)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              )
+            else
+              SpeechRecordingWidget(
+                targetText: item.contentText,
+                onResult: onReciteResult,
+                onDismiss: onReciteDismiss,
+              ),
+            const SizedBox(height: 12),
+          ],
+
+          const SizedBox(height: 12),
 
           // Rating section — shown when all blanks revealed or level 0
           if (allRevealed || clozeLevel == 0) ...[

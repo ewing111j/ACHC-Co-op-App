@@ -50,6 +50,12 @@ dependencies:
   # Memory Work module
   just_audio: 0.9.41
 
+  # P3-1: Speech-to-text (on-device, privacy-safe)
+  speech_to_text: 6.6.0
+
+  # P3-3: Charts for admin analytics
+  fl_chart: 0.69.0
+
   # PDF printing
   printing: 5.14.2
   pdf: 3.11.1
