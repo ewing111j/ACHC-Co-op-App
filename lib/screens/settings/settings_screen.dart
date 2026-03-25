@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../models/user_model.dart';
 import '../../services/notification_prefs_service.dart';
+import '../../services/duty_reminder_service.dart';
 import '../moodle/moodle_setup_screen.dart';
 import 'claim_student_screen.dart';
 
@@ -18,16 +19,27 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, bool> _notifPrefs = {};
+  bool _notifyDuties = true; // P2-7: duty reminder preference
 
   @override
   void initState() {
     super.initState();
     _loadNotifPrefs();
+    _loadDutyNotifPref();
   }
 
   Future<void> _loadNotifPrefs() async {
     final prefs = await NotificationPrefsService.loadPrefs();
     if (mounted) setState(() => _notifPrefs = prefs);
+  }
+
+  // P2-7: Load duty notification preference
+  Future<void> _loadDutyNotifPref() async {
+    final auth = context.read<AuthProvider>();
+    final uid = auth.currentUser?.uid;
+    if (uid == null) return;
+    final val = await DutyReminderService.getNotifyDuties(uid);
+    if (mounted) setState(() => _notifyDuties = val);
   }
 
   Future<void> _setNotifPref(String key, bool value) async {
@@ -259,6 +271,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: const Text('Choose which sections show a badge'),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 14),
                     onTap: () => _showNotifSettings(context),
+                  ),
+                  const Divider(height: 1, indent: 72),
+                  // P2-7: Duty reminder toggle
+                  ListTile(
+                    leading: const Icon(Icons.volunteer_activism_outlined,
+                        color: AppTheme.calendarColor),
+                    title: const Text('Duty Reminders'),
+                    subtitle: const Text(
+                        'Notify me the morning of my volunteer duty'),
+                    trailing: Switch(
+                      value: _notifyDuties,
+                      activeTrackColor: AppTheme.calendarColor,
+                      activeThumbColor: AppTheme.calendarColor,
+                      onChanged: (v) async {
+                        setState(() => _notifyDuties = v);
+                        await DutyReminderService.setNotifyDuties(
+                            uid: user.uid, value: v);
+                        // Reschedule (or cancel) reminders immediately
+                        await DutyReminderService.instance
+                            .scheduleRemindersForUser(
+                          displayName: user.displayName,
+                          uid: user.uid,
+                        );
+                      },
+                    ),
                   ),
                   const Divider(height: 1, indent: 72),
                 ],

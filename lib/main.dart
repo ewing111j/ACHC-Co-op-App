@@ -15,6 +15,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'utils/app_theme.dart';
+import 'services/duty_reminder_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,9 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // P2-7: Initialize duty reminder notification service
+  await DutyReminderService.instance.initialize();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

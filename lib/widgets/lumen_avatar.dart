@@ -25,13 +25,16 @@ class LumenAvatarWidget extends StatefulWidget {
 }
 
 class _LumenAvatarWidgetState extends State<LumenAvatarWidget>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _controller;
   late final Animation<double> _glowAnim;
+  // P2-4: inner glow ring at 180° phase offset
+  late final Animation<double> _innerGlowAnim;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AnimationController(
       vsync: this,
       duration: AppAnimations.lumenGlowPeriod,
@@ -44,10 +47,20 @@ class _LumenAvatarWidgetState extends State<LumenAvatarWidget>
       parent: _controller,
       curve: Curves.easeInOut,
     ));
+
+    // P2-4: inner glow ring — reversed phase (min when outer is max)
+    _innerGlowAnim = Tween<double>(
+      begin: AppAnimations.lumenGlowMaxOpacity,
+      end: AppAnimations.lumenGlowMinOpacity,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -85,20 +98,47 @@ class _LumenAvatarWidgetState extends State<LumenAvatarWidget>
         child: AnimatedBuilder(
           animation: _glowAnim,
           builder: (context, child) {
-            return Container(
-              width: widget.size,
-              height: widget.size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: _glowColor.withValues(alpha: _glowAnim.value),
-                    blurRadius: AppAnimations.lumenGlowBlurRadius,
-                    spreadRadius: 2,
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                // Outer glow ring
+                Container(
+                  width: widget.size + 8,
+                  height: widget.size + 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: _glowColor.withValues(alpha: _glowAnim.value),
+                        blurRadius: AppAnimations.lumenGlowBlurRadius,
+                        spreadRadius: 2,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: child,
+                ),
+                // P2-4: Inner glow ring at 180° phase offset for depth
+                Container(
+                  width: widget.size - 4,
+                  height: widget.size - 4,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: _glowColor.withValues(
+                            alpha: _innerGlowAnim.value * 0.5),
+                        blurRadius: AppAnimations.lumenGlowBlurRadius * 0.5,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+                // Avatar image
+                Container(
+                  width: widget.size,
+                  height: widget.size,
+                  child: child,
+                ),
+              ],
             );
           },
           child: ClipOval(

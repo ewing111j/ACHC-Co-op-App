@@ -5,7 +5,6 @@
 // Degrades gracefully to a ColoredBox if asset is missing.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/app_animations.dart';
 import '../utils/app_theme.dart';
 
@@ -26,14 +25,18 @@ class LumenHomePanel extends StatefulWidget {
 }
 
 class _LumenHomePanelState extends State<LumenHomePanel>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _controller;
   late final Animation<double> _scaleAnim;
   late final Animation<double> _yAnim;
+  // P2-4 polish: shadow blur + subtle horizontal sway
+  late final Animation<double> _shadowBlurAnim;
+  late final Animation<double> _swayAnim;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = AnimationController(
       vsync: this,
       duration: AppAnimations.lumenBreathePeriod,
@@ -50,10 +53,19 @@ class _LumenHomePanelState extends State<LumenHomePanel>
           parent: _controller,
           curve: AppAnimations.lumenBreatheCurve,
         ));
+
+    // P2-4: shadow blur 8→14, sway rotate ±1°
+    _shadowBlurAnim = Tween<double>(begin: 8.0, end: 14.0).animate(
+      CurvedAnimation(parent: _controller, curve: AppAnimations.lumenBreatheCurve),
+    );
+    _swayAnim = Tween<double>(begin: -0.0175, end: 0.0175).animate(
+      CurvedAnimation(parent: _controller, curve: AppAnimations.lumenBreatheCurve),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -87,9 +99,24 @@ class _LumenHomePanelState extends State<LumenHomePanel>
           builder: (context, child) {
             return Transform.translate(
               offset: Offset(0, _yAnim.value),
-              child: Transform.scale(
-                scale: _scaleAnim.value,
-                child: child,
+              child: Transform.rotate(
+                angle: _swayAnim.value,
+                child: Transform.scale(
+                  scale: _scaleAnim.value,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.gold.withValues(alpha: 0.25),
+                          blurRadius: _shadowBlurAnim.value,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: child,
+                  ),
+                ),
               ),
             );
           },

@@ -21,6 +21,9 @@ import '../memory/memory_home_screen.dart';
 import '../../providers/memory_provider.dart';
 import '../../widgets/volunteer_rotation_card.dart';
 import '../coverage/coverage_screen.dart';
+import '../dashboard/weekly_dashboard_screen.dart';
+import '../training/training_home_screen.dart';
+import '../dashboard/parent_week_summary_screen.dart';
 import '../../models/coverage_models.dart';
 import '../../services/coverage_service.dart';
 
@@ -506,7 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .orderBy('createdAt', descending: true)
               .limit(20)),
         _FeatureItem('Training', Icons.school_outlined,
-          const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
+          AppTheme.trainingColor, TrainingHomeScreen(user: user),
           seenKey: 'training'),
         _FeatureItem('Memory Work', Icons.auto_stories_outlined,
           const Color(0xFF1565C0), _MemoryWorkEntry(user: user),
@@ -546,11 +549,18 @@ class _HomeScreenState extends State<HomeScreen> {
         notifKey: NotificationPrefsService.keyFeedAnnouncements,
         seenKey: 'feeds'),
       _FeatureItem('Training', Icons.school_outlined,
-        const Color(0xFF5D4037), const _PlaceholderScreen(title: 'Training Modules'),
+        AppTheme.trainingColor, TrainingHomeScreen(user: user),
         seenKey: 'training'),
       _FeatureItem('Memory Work', Icons.auto_stories_outlined,
         const Color(0xFF1565C0), _MemoryWorkEntry(user: user),
         seenKey: 'memorywork'),
+      _FeatureItem('My Week', Icons.today_outlined,
+        AppTheme.calendarColor,
+        // Parents get the family summary; admins/mentors get the full dashboard
+        user.isParent && !user.isAdmin
+            ? ParentWeekSummaryScreen(user: user)
+            : WeeklyDashboardScreen(user: user),
+        seenKey: 'myweek'),
     ];
   }
 

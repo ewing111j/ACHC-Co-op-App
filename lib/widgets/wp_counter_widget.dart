@@ -4,7 +4,6 @@
 // Used in MemoryWorkHomeScreen header and AchievementsScreen.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import '../utils/app_animations.dart';
 import '../utils/app_theme.dart';
 

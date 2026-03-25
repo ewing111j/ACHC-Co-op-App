@@ -4,7 +4,6 @@
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'app_animations.dart';
 
 class StarBurstPainter extends CustomPainter {
   final double progress; // 0.0 → 1.0 driven by AnimationController

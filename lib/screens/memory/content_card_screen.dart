@@ -8,6 +8,8 @@ import '../../models/memory/memory_models.dart';
 import '../../models/user_model.dart';
 import '../../utils/app_theme.dart';
 import '../../providers/memory_provider.dart';
+import '../../providers/class_mode_provider.dart';
+import '../../services/cloze_override_service.dart';
 import 'cloze_text_widget.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,6 +83,27 @@ class _ContentCardScreenState extends State<ContentCardScreen> {
   }
 
   Future<void> _loadClozeLevel() async {
+    // P2-5: Check Firestore class override first (class mode or admin override)
+    final classProv = context.read<ClassModeProvider>();
+    final classId = classProv.currentClassId;
+
+    if (classId != null) {
+      try {
+        final overrideLevel = await ClozeOverrideService().getOverrideLevel(
+          classId: classId,
+          subjectId: widget.subjectId,
+          unitNumber: _currentUnit,
+        );
+        if (overrideLevel != null && mounted) {
+          setState(() => _clozeLevel = overrideLevel);
+          return; // override wins — don't load personal pref
+        }
+      } catch (_) {
+        // Non-fatal; fall through to personal pref
+      }
+    }
+
+    // Fall back to per-student SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getInt('cloze_level_${widget.subjectId}') ?? 0;
     if (mounted) setState(() => _clozeLevel = saved);

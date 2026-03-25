@@ -18,10 +18,12 @@ import 'parent_dashboard_screen.dart';
 import 'drill_setup_screen.dart';
 import 'battle_entry_screen.dart';
 import 'achievements_screen.dart';
+import 'leaderboard_screen.dart';
 import 'memory_settings_screen.dart';
 import 'content_manager_screen.dart';
 import 'young_learner_screens.dart';
 import 'class_battle_screen.dart';
+import 'admin_cloze_settings_screen.dart';
 import '../../providers/class_mode_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +116,18 @@ class _MemoryWorkHomeScreenState extends State<MemoryWorkHomeScreen> {
                           onPressed: () => Navigator.pop(context),
                         ),
                   actions: [
+                    if (widget.user.isAdmin || widget.user.canMentor)
+                      IconButton(
+                        icon: const Icon(Icons.tune_outlined),
+                        tooltip: 'Cloze Overrides',
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AdminClozeSettingsScreen(
+                                user: widget.user),
+                          ),
+                        ),
+                      ),
                     if (widget.user.isAdmin)
                       IconButton(
                         icon: const Icon(Icons.settings_outlined),
@@ -386,6 +400,29 @@ class _HomeBody extends StatelessWidget {
 
         // Parent/Mentor/Admin extras
         if (!user.isStudent) ...[
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => LeaderboardScreen(user: user),
+                    ),
+                  ),
+                  icon: const Icon(Icons.emoji_events_outlined, size: 18),
+                  label: const Text('Leaderboard'),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppTheme.gold),
+                    foregroundColor: AppTheme.gold,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(

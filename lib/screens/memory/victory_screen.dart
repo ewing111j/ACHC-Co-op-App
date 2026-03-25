@@ -1,7 +1,8 @@
 // lib/screens/memory/victory_screen.dart
-// Animation 9: Victory splash — scale + WP pop-in.
+// Animation 9: Victory splash — scale + WP pop-in + sparkle particles (P2-4).
 // Shown after defeating a battle enemy.
 
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/user_model.dart';
@@ -9,7 +10,7 @@ import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
 import '../../widgets/wp_counter_widget.dart';
 
-class VictoryScreen extends StatelessWidget {
+class VictoryScreen extends StatefulWidget {
   final UserModel user;
   final int wpEarned;
   final String enemyName;
@@ -22,22 +23,95 @@ class VictoryScreen extends StatelessWidget {
   });
 
   @override
+  State<VictoryScreen> createState() => _VictoryScreenState();
+}
+
+class _VictoryScreenState extends State<VictoryScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sparkleController;
+  final _random = math.Random();
+  late final List<_SparkleParticle> _sparkles;
+
+  @override
+  void initState() {
+    super.initState();
+    _sparkleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+
+    _sparkles = List.generate(7, (i) => _SparkleParticle(
+      x: 0.1 + _random.nextDouble() * 0.8,
+      y: 0.05 + _random.nextDouble() * 0.6,
+      size: 4.0 + _random.nextDouble() * 6.0,
+      speed: 0.15 + _random.nextDouble() * 0.25,
+      delay: _random.nextDouble() * 0.7,
+      color: i % 2 == 0 ? AppTheme.gold : Colors.white,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _sparkleController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (MediaQuery.of(context).disableAnimations) {
       return _StaticVictory(
-          user: user, wpEarned: wpEarned, enemyName: enemyName);
+          user: widget.user, wpEarned: widget.wpEarned, enemyName: widget.enemyName);
     }
 
     return Scaffold(
       backgroundColor: AppTheme.navy,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Victory star splash (Animation 9)
+      body: Stack(
+        children: [
+          // P2-4: Sparkle particles drifting upward
+          RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: _sparkleController,
+              builder: (context, _) {
+                final size = MediaQuery.of(context).size;
+                return Stack(
+                  children: _sparkles.map((s) {
+                    final t = ((_sparkleController.value - s.delay) % 1.0 + 1.0) % 1.0;
+                    final y = s.y * size.height - s.speed * size.height * t;
+                    final opacity = t < 0.2 ? t / 0.2 : t > 0.8 ? (1.0 - t) / 0.2 : 1.0;
+                    return Positioned(
+                      left: s.x * size.width,
+                      top: y,
+                      child: Opacity(
+                        opacity: opacity.clamp(0.0, 1.0),
+                        child: Container(
+                          width: s.size,
+                          height: s.size,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: s.color.withValues(alpha: 0.85),
+                            boxShadow: [
+                              BoxShadow(
+                                color: s.color.withValues(alpha: 0.4),
+                                blurRadius: s.size,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ),
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Victory star splash (Animation 9)
                 const Text('⭐', style: TextStyle(fontSize: 80))
                     .animate()
                     .scale(
@@ -64,8 +138,8 @@ class VictoryScreen extends StatelessWidget {
                     .fadeIn()
                     .moveY(begin: 20, end: 0),
                 const SizedBox(height: 12),
-                Text(
-                  'You defeated $enemyName!',
+                    Text(
+                  'You defeated ${widget.enemyName}!',
                   style: TextStyle(
                     fontSize: 18,
                     color: Colors.white.withValues(alpha: 0.8),
@@ -100,7 +174,7 @@ class VictoryScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       WPCounterWidget(
-                        wp: wpEarned,
+                        wp: widget.wpEarned,
                         fontSize: 36,
                         showLabel: false,
                       ),
@@ -152,13 +226,33 @@ class VictoryScreen extends StatelessWidget {
                     ),
                   ],
                 ).animate(delay: const Duration(milliseconds: 600)).fadeIn(),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
+}
+
+class _SparkleParticle {
+  final double x;
+  final double y;
+  final double size;
+  final double speed;
+  final double delay;
+  final Color color;
+
+  const _SparkleParticle({
+    required this.x,
+    required this.y,
+    required this.size,
+    required this.speed,
+    required this.delay,
+    required this.color,
+  });
 }
 
 class _StaticVictory extends StatelessWidget {

@@ -7,7 +7,6 @@ import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
 import '../../widgets/lumen_home_panel.dart';
-import '../../widgets/wp_counter_widget.dart';
 import 'cloze_text_widget.dart';
 import 'victory_screen.dart';
 import 'defeat_screen.dart';
