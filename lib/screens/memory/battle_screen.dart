@@ -7,6 +7,7 @@ import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
 import '../../widgets/lumen_home_panel.dart';
+import '../../widgets/lumen_hearts_bar.dart';
 import 'cloze_text_widget.dart';
 import 'victory_screen.dart';
 import 'defeat_screen.dart';
@@ -183,10 +184,14 @@ class _BattleScreenState extends State<BattleScreen> {
                               fontSize: 12,
                               fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(_lumenHearts, (_) =>
-                          const Text('❤️', style: TextStyle(fontSize: 14))),
+                      LumenHeartsBar(
+                        currentHp: _lumenHearts,
+                        maxHp: widget.difficulty == 'gentle'
+                            ? 7
+                            : widget.difficulty == 'scholars'
+                                ? 3
+                                : 5,
+                        width: 110,
                       ),
                     ],
                   ),
