@@ -1,7 +1,7 @@
 // lib/widgets/lumen_avatar.dart
 // Animation 2: Lumen Avatar — glow pulse loop.
 // Used in AppBar chips, ParentDashboard child cards, header rows.
-// Level-based PNG: assets/lumen/lumen_avatar_level_{1-5}.png
+// Level-based PNG: assets/lumen/lumen_avatar_{1-5}.png
 // Glow color: gold for levels 1–3, purple for levels 4–5 (Phase 2 polish).
 
 import 'package:flutter/material.dart';
@@ -83,7 +83,7 @@ class _LumenAvatarWidgetState extends State<LumenAvatarWidget>
 
   String get _assetPath {
     final l = widget.level.clamp(1, 5);
-    return 'assets/lumen/lumen_avatar_level_$l.png';
+    return 'assets/lumen/lumen_avatar_$l.png';
   }
 
   @override

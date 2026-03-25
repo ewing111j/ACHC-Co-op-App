@@ -5,6 +5,7 @@ import '../../models/user_model.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/class_mode_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../widgets/lumen_home_panel.dart';
 import 'battle_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -379,18 +380,50 @@ class _BattleQuestionScreen extends StatelessWidget {
 
             const Spacer(),
 
-            // Enemy display
-            Text(
-              _enemyEmoji(difficulty),
-              style: const TextStyle(fontSize: 80),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              enemyName,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700),
+            // Battle header: Lumen (class variant) vs Enemy
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Column(
+                  children: [
+                    Consumer<MemoryProvider>(
+                      builder: (context, provider, _) => LumenHomePanel(
+                        level: provider.lumenState?.lumenLevel ?? 3,
+                        isClassBattle: true,
+                        width: 80,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('Lumen',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+                const Text('VS',
+                    style: TextStyle(
+                        color: AppTheme.gold,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2)),
+                Column(
+                  children: [
+                    Text(
+                      _enemyEmoji(difficulty),
+                      style: const TextStyle(fontSize: 64),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      enemyName,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ],
             ),
 
             const Spacer(),

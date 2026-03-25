@@ -1,6 +1,7 @@
 // lib/widgets/lumen_home_panel.dart
 // Animation 1: Lumen Home Panel — idle breathing loop.
-// Level-based PNG asset: assets/lumen/lumen_home_level_{1-5}.png
+// Level-based PNG asset: assets/lumen/lumen_level_{1-5}.png
+// Class-battle variant: assets/lumen/lumen_class_battle.png
 // Tapping navigates to AchievementsScreen.
 // Degrades gracefully to a ColoredBox if asset is missing.
 
@@ -9,15 +10,17 @@ import '../utils/app_animations.dart';
 import '../utils/app_theme.dart';
 
 class LumenHomePanel extends StatefulWidget {
-  final int level;          // 1–5
-  final double width;       // default 160, class mode uses 260
+  final int level;             // 1–5
+  final double width;          // default 160, class mode uses 260
   final VoidCallback? onTap;
+  final bool isClassBattle;    // use lumen_class_battle.png (Level-3 + pennant)
 
   const LumenHomePanel({
     super.key,
     required this.level,
     this.width = 160.0,
     this.onTap,
+    this.isClassBattle = false,
   });
 
   @override
@@ -80,8 +83,9 @@ class _LumenHomePanelState extends State<LumenHomePanel>
   }
 
   String get _assetPath {
+    if (widget.isClassBattle) return 'assets/lumen/lumen_class_battle.png';
     final l = widget.level.clamp(1, 5);
-    return 'assets/lumen/lumen_home_level_$l.png';
+    return 'assets/lumen/lumen_level_$l.png';
   }
 
   @override
