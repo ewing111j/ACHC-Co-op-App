@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/user_model.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/battle_assets.dart';
 import 'battle_screen.dart';
 
 class BattleEntryScreen extends StatefulWidget {
@@ -30,6 +31,11 @@ class _BattleEntryScreenState extends State<BattleEntryScreen> {
     if (unit <= 18) return '🌫️';
     if (unit <= 25) return '⚔️';
     return '🌑';
+  }
+
+  String get _enemyImage {
+    final unit = context.read<MemoryProvider>().currentUnit;
+    return BattleAssets.enemyImageForUnit(unit);
   }
 
   int get _enemyOrbs {
@@ -64,7 +70,18 @@ class _BattleEntryScreenState extends State<BattleEntryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 20),
-                  Text(_enemyEmoji, style: const TextStyle(fontSize: 72)),
+                  // Real enemy PNG with emoji fallback
+                  SizedBox(
+                    height: 180,
+                    child: Image.asset(
+                      _enemyImage,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Text(
+                        _enemyEmoji,
+                        style: const TextStyle(fontSize: 72),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     _enemyName,

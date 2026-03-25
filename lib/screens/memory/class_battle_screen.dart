@@ -5,6 +5,7 @@ import '../../models/user_model.dart';
 import '../../providers/memory_provider.dart';
 import '../../providers/class_mode_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/battle_assets.dart';
 import '../../widgets/lumen_home_panel.dart';
 import 'battle_screen.dart';
 
@@ -409,9 +410,17 @@ class _BattleQuestionScreen extends StatelessWidget {
                         letterSpacing: 2)),
                 Column(
                   children: [
-                    Text(
-                      _enemyEmoji(difficulty),
-                      style: const TextStyle(fontSize: 64),
+                    SizedBox(
+                      height: 80,
+                      width: 80,
+                      child: Image.asset(
+                        BattleAssets.enemyImageForDifficulty(difficulty),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Text(
+                          _enemyEmoji(difficulty),
+                          style: const TextStyle(fontSize: 64),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(

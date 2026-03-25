@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/user_model.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
+import '../../utils/battle_assets.dart';
 
 class DefeatScreen extends StatelessWidget {
   final UserModel user;
@@ -27,34 +28,26 @@ class DefeatScreen extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          // Desaturated background (Animation 10 — mist effect via opacity)
+          // Defeat background — dark library fading to mist (Animation 10)
+          Positioned.fill(
+            child: Image.asset(
+              BattleAssets.defeatBg,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(color: Colors.blueGrey[900]),
+            ).animate()
+                .fadeIn(duration: AppAnimations.defeatMistDuration),
+          ),
+          // Desaturation overlay
           Positioned.fill(
             child: ColorFiltered(
               colorFilter: const ColorFilter.matrix([
                 0.2126, 0.7152, 0.0722, 0, 0,
                 0.2126, 0.7152, 0.0722, 0, 0,
                 0.2126, 0.7152, 0.0722, 0, 0,
-                0,      0,      0,      1, 0,
+                0,      0,      0,      0.5, 0,
               ]),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.blueGrey[900]!,
-                      Colors.blueGrey[700]!,
-                    ],
-                  ),
-                ),
-              ),
-            ).animate()
-                .fadeIn(duration: AppAnimations.defeatMistDuration)
-                .then()
-                .shimmer(
-                  duration: const Duration(milliseconds: 2000),
-                  color: Colors.white.withValues(alpha: 0.05),
-                ),
+              child: Container(color: Colors.transparent),
+            ),
           ),
           // Dim overlay (Animation 10 — mist fade)
           Positioned.fill(

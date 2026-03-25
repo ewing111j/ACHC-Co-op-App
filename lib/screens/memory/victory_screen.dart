@@ -8,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../models/user_model.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
+import '../../utils/battle_assets.dart';
 import '../../widgets/wp_counter_widget.dart';
 
 class VictoryScreen extends StatefulWidget {
@@ -67,6 +68,17 @@ class _VictoryScreenState extends State<VictoryScreen>
       backgroundColor: AppTheme.navy,
       body: Stack(
         children: [
+          // Victory background
+          Positioned.fill(
+            child: Image.asset(
+              BattleAssets.victoryBg,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(color: AppTheme.navy),
+            ),
+          ),
+          Positioned.fill(
+            child: Container(color: AppTheme.navy.withValues(alpha: 0.45)),
+          ),
           // P2-4: Sparkle particles drifting upward
           RepaintBoundary(
             child: AnimatedBuilder(
@@ -111,7 +123,7 @@ class _VictoryScreenState extends State<VictoryScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Victory star splash (Animation 9)
+                    // Victory star splash (Animation 9) — gold star over bg
                 const Text('⭐', style: TextStyle(fontSize: 80))
                     .animate()
                     .scale(

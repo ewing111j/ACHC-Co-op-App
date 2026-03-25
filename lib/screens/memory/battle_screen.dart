@@ -6,6 +6,7 @@ import '../../models/memory/memory_models.dart';
 import '../../providers/memory_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/app_animations.dart';
+import '../../utils/battle_assets.dart';
 import '../../widgets/lumen_home_panel.dart';
 import '../../widgets/lumen_hearts_bar.dart';
 import '../../widgets/enemy_orbs_bar.dart';
@@ -40,6 +41,8 @@ class _BattleScreenState extends State<BattleScreen> {
   bool _allRevealed = false;
   late int _lumenHearts;
   late int _enemyOrbs;
+  bool _showLumenAttack = false;
+  bool _showEnemyAttack = false;
 
   int get _clozeLevel {
     switch (widget.difficulty) {
@@ -151,6 +154,8 @@ class _BattleScreenState extends State<BattleScreen> {
     }
 
     final card = _cards[_index];
+    final unit = context.watch<MemoryProvider>().currentUnit;
+    final enemyImage = BattleAssets.enemyImageForUnit(unit);
 
     return Scaffold(
       backgroundColor: AppTheme.navy,
@@ -164,82 +169,130 @@ class _BattleScreenState extends State<BattleScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Battle header: Lumen vs Enemy
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                // Lumen — uses LumenHomePanel (Animation 1)
-                Expanded(
-                  child: Column(
-                    children: [
-                      LumenHomePanel(
-                        level: context.watch<MemoryProvider>().lumenState?.lumenLevel ?? 1,
-                        width: 60,
-                      ),
-                      const Text('Lumen',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      LumenHeartsBar(
-                        currentHp: _lumenHearts,
-                        maxHp: widget.difficulty == 'gentle'
-                            ? 7
-                            : widget.difficulty == 'scholars'
-                                ? 3
-                                : 5,
-                        width: 110,
-                      ),
-                    ],
-                  ),
-                ),
-                const Text('⚡',
-                    style: TextStyle(fontSize: 28, color: Colors.white)),
-                // Enemy — Animation 6: slide-in from right on load
-                Expanded(
-                  child: Column(
-                    children: [
-                      Text(widget.enemyEmoji,
-                          style: const TextStyle(fontSize: 36))
-                          .animate(key: ValueKey(_index))
-                          .moveX(
-                            begin: AppAnimations.enemyEnterOffsetX,
-                            end: 0,
-                            duration: AppAnimations.enemyEnterDuration,
-                            curve: AppAnimations.enemyEnterCurve,
-                          )
-                          .fadeIn(duration: AppAnimations.enemyEnterDuration),
-                      Text(widget.enemyName,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600),
-                          textAlign: TextAlign.center),
-                      const SizedBox(height: 4),
-                      // Enemy HP orbs — pre-rendered bar image (Animation 7)
-                      EnemyOrbsBar(
-                        currentOrbs: _enemyOrbs,
-                        maxOrbs: widget.enemyOrbs,
-                        width: 110,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+          // ── Battle background ───────────────────────────────────────────
+          Positioned.fill(
+            child: Image.asset(
+              BattleAssets.battleBg,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(color: AppTheme.navy),
             ),
           ),
-          // Card
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+          Positioned.fill(
+            child: Container(color: AppTheme.navy.withValues(alpha: 0.72)),
+          ),
+
+          // ── Attack flash overlays ───────────────────────────────────────
+          if (_showLumenAttack)
+            Positioned(
+              top: 60, left: 0, right: 0,
+              child: Image.asset(
+                BattleAssets.attackLumen,
+                height: 64,
+                fit: BoxFit.fitHeight,
+                errorBuilder: (_, __, ___) => const SizedBox(),
+              ).animate().fadeIn(duration: 180.ms).then().fadeOut(duration: 320.ms),
+            ),
+          if (_showEnemyAttack)
+            Positioned(
+              top: 60, left: 0, right: 0,
+              child: Transform.flip(
+                flipX: true,
+                child: Image.asset(
+                  BattleAssets.attackEnemy,
+                  height: 64,
+                  fit: BoxFit.fitHeight,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ).animate().fadeIn(duration: 180.ms).then().fadeOut(duration: 320.ms),
+            ),
+
+          // ── Main content column ─────────────────────────────────────────
+          Column(
+            children: [
+              // Battle header: Lumen vs Enemy
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    // Lumen — uses LumenHomePanel (Animation 1)
+                    Expanded(
+                      child: Column(
+                        children: [
+                          LumenHomePanel(
+                            level: context.watch<MemoryProvider>().lumenState?.lumenLevel ?? 1,
+                            width: 60,
+                          ),
+                          const Text('Lumen',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          LumenHeartsBar(
+                            currentHp: _lumenHearts,
+                            maxHp: widget.difficulty == 'gentle'
+                                ? 7
+                                : widget.difficulty == 'scholars'
+                                    ? 3
+                                    : 5,
+                            width: 110,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Text('⚡',
+                        style: TextStyle(fontSize: 28, color: Colors.white)),
+                    // Enemy — Animation 6: slide-in from right
+                    Expanded(
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: 72,
+                            child: Image.asset(
+                              enemyImage,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Text(
+                                widget.enemyEmoji,
+                                style: const TextStyle(fontSize: 36),
+                              ),
+                            ),
+                          )
+                              .animate(key: ValueKey(_index))
+                              .moveX(
+                                begin: AppAnimations.enemyEnterOffsetX,
+                                end: 0,
+                                duration: AppAnimations.enemyEnterDuration,
+                                curve: AppAnimations.enemyEnterCurve,
+                              )
+                              .fadeIn(duration: AppAnimations.enemyEnterDuration),
+                          Text(widget.enemyName,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600),
+                              textAlign: TextAlign.center),
+                          const SizedBox(height: 4),
+                          EnemyOrbsBar(
+                            currentOrbs: _enemyOrbs,
+                            maxOrbs: widget.enemyOrbs,
+                            width: 110,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              // ── Card ──────────────────────────────────────────────────────
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
@@ -307,8 +360,10 @@ class _BattleScreenState extends State<BattleScreen> {
               ),
             ),
           ),
-        ],
-      ),
+            ], // Column children
+          ), // Column
+        ], // Stack children
+      ), // Stack / body
     );
   }
 }
